@@ -1,9 +1,14 @@
 # HACS repository validation (https://www.hacs.xyz/docs/publish/action/). It checks the
 # repository as HACS sees it on GitHub: description, topics, issues enabled, README with images,
 # hacs.json, and the card file. dist/ is not committed, so HACS finds the card file on the
-# LATEST RELEASE (the asset attached by release.yml): until a first release carries that asset,
-# this check fails. Run it again (Actions > Validate > Run workflow) once release.yml has
-# attached the asset.
+# LATEST STABLE RELEASE (the asset attached by release.yml; pre-releases are ignored): until a
+# first stable release carries that asset, HACS falls back to the default branch and reports
+# "Repository structure for refs/heads/main is not compliant".
+#
+# A push to main runs this check BEFORE the tag's release exists (release.yml takes a minute), so
+# the very first push of a new repository fails here. The workflow_run trigger re-runs the check
+# once release.yml has succeeded. (A release created by release.yml with GITHUB_TOKEN does not
+# trigger "release" workflows, but it does trigger workflow_run.)
 name: Validate
 
 on:
@@ -11,6 +16,9 @@ on:
     # Branches only: a tag push happens before release.yml has attached the asset.
     branches: ['**']
   pull_request:
+  workflow_run:
+    workflows: [Release]
+    types: [completed]
   schedule:
     - cron: '17 4 * * 1' # weekly, Monday 04:17 UTC
   workflow_dispatch:
@@ -22,8 +30,12 @@ jobs:
     name: HACS validation
     # On a pull request the action validates the HEAD repository: a fork has no releases, hence
     # no card file, and would always fail. Pull requests from this repository's own branches
-    # share its releases and are checked.
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    # share its releases and are checked. After release.yml, only a successful release is worth
+    # validating (a failed one published nothing).
+    if: >-
+      (github.event_name != 'pull_request' ||
+       github.event.pull_request.head.repo.full_name == github.repository) &&
+      (github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success')
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
