@@ -86,15 +86,17 @@ syntax of 2024.10.
 
 ### HACS (custom repository)
 
-The repository needs at least one published GitHub release carrying `time-curve-card.js` (the
-Release workflow attaches it, see [Releasing](#releasing)): `dist/` is not committed, so before
-that HACS finds no card file and refuses the custom repository ("Repository structure for … is not
-compliant").
+The repository needs at least one published, **non-pre-release** GitHub release carrying
+`time-curve-card.js` (the Release workflow attaches it, see [Releasing](#releasing)). HACS ignores
+pre-releases until "Show beta versions" is turned on for the repository, which is only possible
+once the repository is added; with no stable release it falls back to the default branch, where
+`dist/` is not committed, and refuses the custom repository ("Repository structure for
+refs/heads/main is not compliant").
 
 1. In Home Assistant, open **HACS**, then the **⋮** menu (top right) → **Custom repositories**.
-2. Repository: `https://github.com/Pekno/time-curve-card`. Type: **Dashboard**. Select **Add**.
-   While only pre-releases exist, open the card in HACS and turn on **Show beta versions** to see
-   them.
+2. Repository: `https://github.com/Pekno/hacs-time-curve-card`. Type: **Dashboard**. Select
+   **Add**. To also get pre-releases later, open the card in HACS and turn on **Show beta
+   versions**.
 3. Open **Time Curve Card** in HACS and download it. HACS offers the latest releases (not the
    default branch, which holds no card file) and downloads `time-curve-card.js` from the release
    assets.
@@ -419,7 +421,8 @@ the card, wired to `setConfig`).
    failure that needs a fix needs a new commit: commit and push the fix, delete the tag
    (`git tag -d v1.2.3 && git push origin :refs/tags/v1.2.3`), then tag the new commit and push
    the tag again (step 2). A tag with a suffix (`v1.2.3-beta.1`) gives a pre-release, which HACS
-   only offers to users who enabled beta versions. **Actions → Release → Run workflow** with a tag
+   only offers to users who enabled beta versions, and never to a user adding the repository: the
+   first release must be a stable one. **Actions → Release → Run workflow** with a tag
    releases an existing tag. The flow works with GitHub's "immutable releases" setting.
 4. The **Validate** workflow runs the HACS checks (`hacs/action`, category `plugin`) on pushes,
    pull requests from this repository's branches, weekly and by hand. It needs a release carrying

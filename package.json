@@ -1,6 +1,6 @@
 {
   "name": "time-curve-card",
-  "version": "0.1.0-beta.1",
+  "version": "0.1.0",
   "description": "Home Assistant Lovelace card: draw any daily curve (brightness, temperature, colour temperature, ...) by dragging points, stored in an input_text helper.",
   "type": "module",
   "private": true,

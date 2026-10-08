@@ -7,7 +7,8 @@
 # releases" setting.
 #
 # A tag with a pre-release suffix ("v1.2.3-beta.1") gives a pre-release, which HACS only offers
-# to users who enabled beta versions. A release that already exists for the tag (a re-run, or one
+# to users who enabled beta versions, and never while a repository is being added (HACS then falls
+# back to the default branch, which holds no card file): the first release must be stable. A release that already exists for the tag (a re-run, or one
 # created by hand) gets the asset when it lacks it (an existing asset is never replaced: gh
 # --clobber deletes it before uploading the new one), and a draft is then published.
 #
