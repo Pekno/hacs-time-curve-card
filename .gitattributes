@@ -1,0 +1,4 @@
+# LF in the repository AND in every checkout, whatever core.autocrlf says: Prettier enforces
+# "endOfLine": "lf" (npm run format:check is a gate), so a CRLF checkout on Windows would fail it.
+* text=auto eol=lf
+*.png binary

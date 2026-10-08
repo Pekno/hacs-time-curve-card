@@ -1,0 +1,61 @@
+# Every push to a branch and every pull request: the same gates as a local "done" check
+# (CLAUDE.md, "Stack & commands"). Tag pushes are left to release.yml.
+name: CI
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    name: Typecheck, lint, format, tests, build, Jinja tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      # No step needs git credentials: the token is not kept in the git config (npm ci runs the
+      # install scripts of the dependencies).
+      - name: Check out
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Node 24
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+
+      # setup-uv publishes no floating major tag since v8 (immutable releases only), so it is
+      # pinned to a full version. uv picks Python from .python-version and the dev group
+      # (jinja2 / PyYAML pinned to Home Assistant's versions) from uv.lock.
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v10.2.0
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Format check
+        run: npm run format:check
+
+      - name: Unit tests
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
+      - name: Jinja sensor tests
+        run: uv run --locked pytest test/jinja

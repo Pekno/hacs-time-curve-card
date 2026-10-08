@@ -1,0 +1,35 @@
+# HACS repository validation (https://www.hacs.xyz/docs/publish/action/). It checks the
+# repository as HACS sees it on GitHub: description, topics, issues enabled, README with images,
+# hacs.json, and the card file. dist/ is not committed, so HACS finds the card file on the
+# LATEST RELEASE (the asset attached by release.yml): until a first release carries that asset,
+# this check fails. Run it again (Actions > Validate > Run workflow) once release.yml has
+# attached the asset.
+name: Validate
+
+on:
+  push:
+    # Branches only: a tag push happens before release.yml has attached the asset.
+    branches: ['**']
+  pull_request:
+  schedule:
+    - cron: '17 4 * * 1' # weekly, Monday 04:17 UTC
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  hacs:
+    name: HACS validation
+    # On a pull request the action validates the HEAD repository: a fork has no releases, hence
+    # no card file, and would always fail. Pull requests from this repository's own branches
+    # share its releases and are checked.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      # The HACS documentation uses "hacs/action@main": the action has no major version tag and
+      # its last version tag (22.5.0) dates from 2022.
+      - name: HACS validation
+        uses: hacs/action@main
+        with:
+          category: plugin

@@ -1,0 +1,43 @@
+{
+  "$comment": "Test descriptor of example-color-temp-package.yaml, read by test/jinja/test_sensor.py (npm run test:jinja). The format is documented in the docstring of that file.",
+  "package": "example-color-temp-package.yaml",
+  "curve_entity": "input_text.color_temp_curve",
+  "sensor_unique_id": "color_temp_curve_target",
+  "range": [200000, 650000],
+  "step": 5000,
+  "unit": "K",
+  "neutral_states": {},
+  "scenarios": [
+    {
+      "name": "default-curve-at-19h",
+      "time": "19:00",
+      "states": { "input_text.color_temp_curve": "17:00@4000;21:00@2700;23:00@2200" },
+      "available": true,
+      "state": 3350,
+      "mode": "curve",
+      "reason": null
+    },
+    {
+      "name": "curve-without-value-is-unavailable",
+      "time": "21:45",
+      "states": {},
+      "matrix": { "input_text.color_temp_curve": ["unavailable", "unknown", null, ""] },
+      "available": false,
+      "state": null,
+      "mode": null,
+      "reason": null
+    }
+  ],
+  "checks": {
+    "curve_helper": {
+      "name": "Colour temperature curve",
+      "min": 0,
+      "mode": "text",
+      "icon": "mdi:chart-bell-curve-cumulative"
+    },
+    "sensor": {
+      "name": "Colour temperature curve target",
+      "icon": "mdi:thermometer-lines"
+    }
+  }
+}

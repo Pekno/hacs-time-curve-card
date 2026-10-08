@@ -1,0 +1,25 @@
+[project]
+name = "time-curve-card-jinja-tests"
+version = "0.0.0"
+description = "Dev-only: renders the HA template sensor with jinja2 against the shared fixture."
+# Home Assistant core itself runs on Python >= 3.14.2 (HAOS ships 3.14). The harness still runs on
+# 3.12 (.python-version); the template relies on no version-dependent Python behaviour and the
+# suite also passes on 3.14 (see the docstring of test/jinja/test_sensor.py). To move to HA's
+# interpreter: close the editors that hold .venv open, set .python-version to 3.14 and this line
+# to ">=3.14", then `uv sync`.
+requires-python = ">=3.12"
+dependencies = []
+
+[dependency-groups]
+# jinja2 and pyyaml are pinned to the exact versions Home Assistant ships
+# (homeassistant/package_constraints.txt: Jinja2==3.1.6, PyYAML==6.0.3): the sandbox rules and
+# the int / dictsort / map / max filters the sensor relies on live in jinja2. Bump them together
+# with HA's package_constraints.txt, never with a blind `uv lock --upgrade`.
+dev = ["jinja2==3.1.6", "pytest>=8", "pyyaml==6.0.3"]
+
+[tool.pytest.ini_options]
+testpaths = ["test/jinja"]
+addopts = "-q"
+
+[tool.uv]
+package = false

@@ -1,0 +1,35 @@
+# =====================================================================
+#  time-curve-card: example card configuration for a heating curve
+#  (goes with ha/example-heating-package.yaml).
+#
+#  Dashboard -> pencil "Edit dashboard" -> "Add card" -> "Manual", then
+#  paste this block. The card's JavaScript module must be installed first
+#  (see the README). Every option is described in
+#  ha/example-dashboard-card.yaml.
+# =====================================================================
+type: custom:time-curve-card
+
+# Required: the input_text that stores the curve (format HH:MM@V;...).
+entity: input_text.heating_curve
+
+# Value range, step, unit and label of the "temperature" preset:
+# 5 to 30 °C, step 0.5 °C. The same range and step are set at the top of
+# the sensor's parse block (vmin / vmax / vstep, in hundredths): keep them
+# equal, otherwise the card and the sensor compute different values.
+preset: temperature
+
+# Optional: the sensor computed by Home Assistant (value + override reason).
+target_sensor: sensor.heating_curve_target
+
+# Optional: the device the curve drives; the card shows its state (for a
+# thermostat, its current temperature). Replace it by yours, or remove it.
+target_entity: climate.your_thermostat
+
+title: Heating
+
+# A whole day: the "curve day" runs from 12:00 to 12:00 the next day.
+# Times are QUOTED on purpose (YAML 1.1 reads 12:00 as a number).
+window_start: "12:00"
+window_end: "12:00"
+snap_minutes: 15
+max_points: 12

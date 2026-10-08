@@ -1,0 +1,318 @@
+# =====================================================================
+#  time-curve-card: example Home Assistant package (heating)
+#
+#  A daily thermostat setpoint curve (5-30 °C, step 0.5 °C) drawn in the
+#  Lovelace card (ha/example-dashboard-heating-card.yaml). Same contract as
+#  the brightness example (ha/example-package.yaml), with another range. To
+#  use it:
+#    1. copy it into the packages/ folder next to configuration.yaml,
+#       e.g. /homeassistant/packages/heating_curve.yaml
+#       (configuration.yaml -> homeassistant: packages: !include_dir_named packages);
+#    2. run "Check configuration" (YAML tab of the developer tools), then
+#       restart Home Assistant;
+#    3. turn input_boolean.heating_curve_enabled on: a new input_boolean
+#       starts off (then Home Assistant restores its state across restarts);
+#    4. add the card and draw a curve, or use the card's reset button to
+#       write its default curve.
+#  You may rename the entities: keep every reference below in sync.
+#
+#  What it contains:
+#  - input_text.heating_curve stores the curve drawn in the card:
+#        HH:MM@V;HH:MM@V;...     e.g. 17:00@20;22:00@18.5;06:00@17;07:00@20
+#    (hour 0-23, minutes on 2 digits, temperature with at most 2 decimals,
+#    clamped to 5-30 °C).
+#  - input_boolean.heating_curve_enabled ("Follow the heating curve"): when
+#    off, the sensor gives a fixed comfort temperature (20 °C) instead, even
+#    without a valid curve. It is an example of an override rule that does not
+#    need the curve; remove it (and its branches below) if you do not need it.
+#  - sensor.heating_curve_target reads the same string and computes the
+#    setpoint for the current time: linear interpolation rounded (half up) to
+#    the 0.5 °C step; the "curve day" runs from 12:00 to 12:00 the next day, so
+#    a night curve can cross midnight. The card computes EXACTLY the same value
+#    (both sides pass the same test cases, test/fixtures/curve-cases.json).
+#    The sensor re-renders every minute because it uses now().
+#  - An optional automation (commented out at the end) that sends the setpoint
+#    to a thermostat.
+#
+#  The sensor has NO device_class on purpose: with device_class temperature,
+#  Home Assistant converts the state to the unit system of the installation
+#  (Fahrenheit on an imperial system), and the card would compare it with a
+#  curve drawn in °C.
+#
+#  Sensor attributes read by the card (target_sensor option):
+#  - mode:   "curve" when the value follows the curve, "override" when a
+#            higher-priority rule decides it;
+#  - reason: why, in your own words, shown as plain text by the card next to
+#            the sensor value (null when mode is "curve").
+# =====================================================================
+
+input_text:
+  heating_curve:
+    # Written by the card. max: 255 is required (the default is 100; 255 is
+    # Home Assistant's hard limit). Do NOT add "initial:": Home Assistant
+    # would reset the curve to it on every restart instead of restoring the
+    # curve you drew.
+    name: "Heating curve"
+    min: 0
+    max: 255
+    mode: text
+    icon: mdi:thermometer-auto
+
+input_boolean:
+  heating_curve_enabled:
+    name: "Follow the heating curve"
+    icon: mdi:thermometer-auto
+
+# Sensor priority rules:
+#   1. curve disabled (input_boolean off) -> the fixed comfort temperature,
+#      20 °C (mode "override", reason "Curve disabled"), whatever the curve;
+#   2. otherwise                          -> the curve's value right now
+#      (mode "curve", no reason);
+#   3. invalid curve (fewer than 2 valid points) or input_text without a
+#      value -> sensor unavailable (except under rule 1).
+#
+# To take the comfort temperature from a helper instead (e.g. an
+# input_number.heating_comfort with step 0.5), replace "2000" in the state
+# template by the helper's value in hundredths:
+#   {% set r.v = (states('input_number.heating_comfort') | float(20) * 100) | round(0) | int %}
+# and make availability of rule 1 {{ has_value('input_number.heating_comfort') }}.
+# Never touch the parse block, the interpolation or the formatting: they are
+# the tested twin of the card's code. The range constants vmin / vmax / vstep
+# at the top of the parse block (in hundredths of a degree: 500 = 5 °C) must
+# match the card's min / max / step (the temperature preset: 5, 30, 0.5).
+template:
+  - sensor:
+      - name: "Heating curve target"
+        unique_id: heating_curve_target
+        unit_of_measurement: "°C"
+        icon: mdi:thermometer-auto
+        # Available under rule 1, or when the curve has a value AND at least 2
+        # valid points. The parse block is IDENTICAL in availability and state
+        # (a test checks it): change one only together with the other.
+        availability: >
+          {# --- parse: begin --- #}
+          {# Value range in hundredths of a unit: 5 °C -> 500, 30 °C -> 3000, #}
+          {#   step 0.5 °C -> 50 (same as the card's min / max / step) #}
+          {% set vmin = 500 %}
+          {% set vmax = 3000 %}
+          {% set vstep = 50 %}
+          {# Step 1: read the text (unknown / unavailable / missing = empty curve) #}
+          {% set text = states('input_text.heating_curve')
+                        if has_value('input_text.heating_curve') else '' %}
+          {% set ns = namespace(pairs=[]) %}
+          {# Step 2: split into "HH:MM@V" tokens separated by ";" #}
+          {% for token in text.split(';') %}
+            {# 2a: strip only spaces and tabs around the token #}
+            {% set tok = token.strip(' \t') %}
+            {% if tok == '' %}{% continue %}{% endif %}
+            {# 2b: overall shape, exactly one "@" and one ":" before it #}
+            {% set at_parts = tok.split('@') %}
+            {% if at_parts | length != 2 %}{% continue %}{% endif %}
+            {% set hm_parts = at_parts[0].split(':') %}
+            {% if hm_parts | length != 2 %}{% continue %}{% endif %}
+            {% set h_txt = hm_parts[0] %}
+            {% set m_txt = hm_parts[1] %}
+            {# 2c: value V = optional "-", integer part, optional "." + decimals #}
+            {% set v_txt = at_parts[1] %}
+            {% set neg = v_txt[:1] == '-' %}
+            {% set v_parts = (v_txt[1:] if neg else v_txt).split('.') %}
+            {% if v_parts | length > 2 %}{% continue %}{% endif %}
+            {% set i_txt = v_parts[0] %}
+            {% set f_txt = v_parts[1] if v_parts | length == 2 else '' %}
+            {# 2d: digit counts: hour 1-2, minutes exactly 2, integer part 1-4, #}
+            {#     decimals 1-2 when there is a "." #}
+            {% set h_len = h_txt | length %}
+            {% set i_len = i_txt | length %}
+            {% set f_len = f_txt | length %}
+            {% if h_len < 1 or h_len > 2 or m_txt | length != 2 or i_len < 1 or i_len > 4
+                  or (v_parts | length == 2 and (f_len < 1 or f_len > 2)) %}{% continue %}{% endif %}
+            {# 2e: ASCII digits 0-9 only, checked one by one BEFORE int: #}
+            {#     HA's int filter would accept ' 70', '+70', '1e2' or full-width digits #}
+            {% set chk = namespace(ok=true) %}
+            {% for c in h_txt ~ m_txt ~ i_txt ~ f_txt %}
+              {% if c not in '0123456789' %}{% set chk.ok = false %}{% endif %}
+            {% endfor %}
+            {% if not chk.ok %}{% continue %}{% endif %}
+            {# 2f: convert; hour 0-23 and minutes 0-59 (24:00 and 19:60 rejected) #}
+            {% set h = h_txt | int(0) %}
+            {% set m = m_txt | int(0) %}
+            {% if h > 23 or m > 59 %}{% continue %}{% endif %}
+            {# 2g: value in hundredths built from the digits, never through a float: #}
+            {#     "19.5" -> 1950, "-2.05" -> -205, "70" -> 7000 #}
+            {% set mag = (i_txt | int(0)) * 100 + ((f_txt ~ '00')[:2] | int(0)) %}
+            {% set v = 0 - mag if neg else mag %}
+            {# 2h: value clamped to the range (e.g. 2 -> 5 °C, 35 -> 30 °C) #}
+            {% set v = vmin if v < vmin else (vmax if v > vmax else v) %}
+            {# 2i: key = position in the 12:00 -> 12:00 curve day #}
+            {#     (12:00 = 0, 23:59 = 719, 00:00 = 720, 11:59 = 1439) #}
+            {% set pos = (h * 60 + m - 720) % 1440 %}
+            {% set ns.pairs = ns.pairs + [(pos, v)] %}
+          {% endfor %}
+          {# Step 3: dict() keeps the LAST value of a duplicate time, then #}
+          {#   dictsort sorts by key, i.e. in the curve day (11:00 comes AFTER 23:00). #}
+          {#   curve = [(position, value in hundredths), ...] #}
+          {% set curve = dict(ns.pairs) | dictsort %}
+          {# --- parse: end --- #}
+          {% if is_state('input_boolean.heating_curve_enabled', 'off') %}
+            true
+          {% else %}
+            {{ has_value('input_text.heating_curve') and curve | length >= 2 }}
+          {% endif %}
+        state: >
+          {# --- parse: begin --- #}
+          {# Value range in hundredths of a unit: 5 °C -> 500, 30 °C -> 3000, #}
+          {#   step 0.5 °C -> 50 (same as the card's min / max / step) #}
+          {% set vmin = 500 %}
+          {% set vmax = 3000 %}
+          {% set vstep = 50 %}
+          {# Step 1: read the text (unknown / unavailable / missing = empty curve) #}
+          {% set text = states('input_text.heating_curve')
+                        if has_value('input_text.heating_curve') else '' %}
+          {% set ns = namespace(pairs=[]) %}
+          {# Step 2: split into "HH:MM@V" tokens separated by ";" #}
+          {% for token in text.split(';') %}
+            {# 2a: strip only spaces and tabs around the token #}
+            {% set tok = token.strip(' \t') %}
+            {% if tok == '' %}{% continue %}{% endif %}
+            {# 2b: overall shape, exactly one "@" and one ":" before it #}
+            {% set at_parts = tok.split('@') %}
+            {% if at_parts | length != 2 %}{% continue %}{% endif %}
+            {% set hm_parts = at_parts[0].split(':') %}
+            {% if hm_parts | length != 2 %}{% continue %}{% endif %}
+            {% set h_txt = hm_parts[0] %}
+            {% set m_txt = hm_parts[1] %}
+            {# 2c: value V = optional "-", integer part, optional "." + decimals #}
+            {% set v_txt = at_parts[1] %}
+            {% set neg = v_txt[:1] == '-' %}
+            {% set v_parts = (v_txt[1:] if neg else v_txt).split('.') %}
+            {% if v_parts | length > 2 %}{% continue %}{% endif %}
+            {% set i_txt = v_parts[0] %}
+            {% set f_txt = v_parts[1] if v_parts | length == 2 else '' %}
+            {# 2d: digit counts: hour 1-2, minutes exactly 2, integer part 1-4, #}
+            {#     decimals 1-2 when there is a "." #}
+            {% set h_len = h_txt | length %}
+            {% set i_len = i_txt | length %}
+            {% set f_len = f_txt | length %}
+            {% if h_len < 1 or h_len > 2 or m_txt | length != 2 or i_len < 1 or i_len > 4
+                  or (v_parts | length == 2 and (f_len < 1 or f_len > 2)) %}{% continue %}{% endif %}
+            {# 2e: ASCII digits 0-9 only, checked one by one BEFORE int: #}
+            {#     HA's int filter would accept ' 70', '+70', '1e2' or full-width digits #}
+            {% set chk = namespace(ok=true) %}
+            {% for c in h_txt ~ m_txt ~ i_txt ~ f_txt %}
+              {% if c not in '0123456789' %}{% set chk.ok = false %}{% endif %}
+            {% endfor %}
+            {% if not chk.ok %}{% continue %}{% endif %}
+            {# 2f: convert; hour 0-23 and minutes 0-59 (24:00 and 19:60 rejected) #}
+            {% set h = h_txt | int(0) %}
+            {% set m = m_txt | int(0) %}
+            {% if h > 23 or m > 59 %}{% continue %}{% endif %}
+            {# 2g: value in hundredths built from the digits, never through a float: #}
+            {#     "19.5" -> 1950, "-2.05" -> -205, "70" -> 7000 #}
+            {% set mag = (i_txt | int(0)) * 100 + ((f_txt ~ '00')[:2] | int(0)) %}
+            {% set v = 0 - mag if neg else mag %}
+            {# 2h: value clamped to the range (e.g. 2 -> 5 °C, 35 -> 30 °C) #}
+            {% set v = vmin if v < vmin else (vmax if v > vmax else v) %}
+            {# 2i: key = position in the 12:00 -> 12:00 curve day #}
+            {#     (12:00 = 0, 23:59 = 719, 00:00 = 720, 11:59 = 1439) #}
+            {% set pos = (h * 60 + m - 720) % 1440 %}
+            {% set ns.pairs = ns.pairs + [(pos, v)] %}
+          {% endfor %}
+          {# Step 3: dict() keeps the LAST value of a duplicate time, then #}
+          {#   dictsort sorts by key, i.e. in the curve day (11:00 comes AFTER 23:00). #}
+          {#   curve = [(position, value in hundredths), ...] #}
+          {% set curve = dict(ns.pairs) | dictsort %}
+          {# --- parse: end --- #}
+          {# r.v = the value in hundredths; none = unavailable #}
+          {% set r = namespace(v=none) %}
+          {% if is_state('input_boolean.heating_curve_enabled', 'off') %}
+            {# Rule 1: curve disabled -> fixed comfort temperature, 20 °C #}
+            {% set r.v = 2000 %}
+          {% elif curve | length < 2 %}
+            {# Rule 3: invalid curve -> sensor unavailable (see availability) #}
+            {# Only a guard: availability is then false, and Home Assistant #}
+            {# renders neither the state nor the attributes of an unavailable sensor #}
+          {% else %}
+            {# Rule 2: the curve's value at the current time (seconds ignored) #}
+            {# now() read ONCE (otherwise hour and minute may come from 2 different minutes) #}
+            {% set t = now() %}
+            {% set k = (t.hour * 60 + t.minute - 720) % 1440 %}
+            {% set k_first, v_first = curve[0] %}
+            {% set k_last, v_last = curve[-1] %}
+            {% if k <= k_first %}
+              {# before the first point -> value of the first point #}
+              {% set r.v = v_first %}
+            {% elif k >= k_last %}
+              {# after the last point -> value of the last point #}
+              {% set r.v = v_last %}
+            {% else %}
+              {# between two points: the segment ka <= k < kb #}
+              {% for i in range((curve | length) - 1) %}
+                {% set ka, a = curve[i] %}
+                {% set kb, b = curve[i + 1] %}
+                {% if ka <= k and k < kb %}
+                  {% if k == ka %}
+                    {# exactly on a point -> its value as stored #}
+                    {% set r.v = a %}
+                  {% else %}
+                    {# linear interpolation in EXACT integers (no float, like the card): #}
+                    {# the value is n / d hundredths, rounded half up to a multiple of #}
+                    {# vstep with Python's floor division //, then clamped to the range #}
+                    {% set d = kb - ka %}
+                    {% set n = a * d + (b - a) * (k - ka) %}
+                    {% set q = ((2 * n + d * vstep) // (2 * d * vstep)) * vstep %}
+                    {% set r.v = vmin if q < vmin else (vmax if q > vmax else q) %}
+                  {% endif %}
+                  {% break %}
+                {% endif %}
+              {% endfor %}
+            {% endif %}
+          {% endif %}
+          {# Format the hundredths without a float: 1950 -> 19.5, 2000 -> 20, -205 -> -2.05 #}
+          {% if r.v is none %}
+            none
+          {% else %}
+            {% set av = 0 - r.v if r.v < 0 else r.v %}
+            {% set fr = av % 100 %}
+            {{ ('-' if r.v < 0 else '') ~ (av // 100)
+               ~ ('' if fr == 0 else '.' ~ (fr // 10) ~ ('' if fr % 10 == 0 else fr % 10)) }}
+          {% endif %}
+        attributes:
+          # Why the value may differ from the curve (read by the card):
+          # "override" when a higher-priority rule decides, "curve" otherwise.
+          mode: >
+            {% if is_state('input_boolean.heating_curve_enabled', 'off') %}
+              override
+            {% else %}
+              curve
+            {% endif %}
+          # Shown as plain text by the card next to the sensor value (whitespace
+          # collapsed), in your own language. {{ none }} publishes a null
+          # attribute: no reason in mode curve.
+          reason: >
+            {% if is_state('input_boolean.heating_curve_enabled', 'off') %}
+              Curve disabled
+            {% else %}
+              {{ none }}
+            {% endif %}
+
+# Optional: send the setpoint to a thermostat whenever it changes. Uncomment
+# it and replace climate.your_thermostat by your climate entity (its
+# temperature unit must be °C). Many thermostats only accept their own step
+# (often 0.5 °C): keep the card's step equal to it.
+#
+# automation:
+#   - id: heating_curve_follow
+#     alias: "Follow the heating curve"
+#     description: "Sends the target temperature to the thermostat"
+#     mode: restart
+#     triggers:
+#       - trigger: state
+#         entity_id: sensor.heating_curve_target
+#         not_from: [unknown, unavailable]
+#         not_to: [unknown, unavailable]
+#     actions:
+#       - action: climate.set_temperature
+#         target:
+#           entity_id: climate.your_thermostat
+#         data:
+#           temperature: "{{ trigger.to_state.state | float }}"

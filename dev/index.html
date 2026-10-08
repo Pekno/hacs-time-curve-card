@@ -1,0 +1,174 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>time-curve-card dev harness</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --primary-color: #03a9f4;
+        --accent-color: #ff9800;
+        /* HA default theme: lights that are on use amber; the card's curve colour resolves to it. */
+        --state-light-active-color: #ffc107;
+        --primary-text-color: #212121;
+        --secondary-text-color: #727272;
+        --disabled-text-color: #bdbdbd;
+        --divider-color: rgba(0, 0, 0, 0.12);
+        --card-background-color: #ffffff;
+        --primary-background-color: #fafafa;
+        --secondary-background-color: #e5e5e5;
+        --error-color: #db4437;
+        --success-color: #43a047;
+        --warning-color: #ffa600;
+        --ha-card-border-radius: 12px;
+        --ha-card-box-shadow: 0 2px 2px 0 rgba(0, 0, 0, 0.14), 0 1px 5px 0 rgba(0, 0, 0, 0.12);
+      }
+      :root[data-theme='dark'] {
+        color-scheme: dark;
+        --primary-text-color: #e1e1e1;
+        --secondary-text-color: #9b9b9b;
+        --disabled-text-color: #6f6f6f;
+        --divider-color: rgba(225, 225, 225, 0.12);
+        --card-background-color: #1c1c1c;
+        --primary-background-color: #111111;
+        --secondary-background-color: #202020;
+      }
+      body {
+        margin: 0;
+        padding: 16px;
+        font-family: Roboto, Noto, sans-serif;
+        background: var(--primary-background-color);
+        color: var(--primary-text-color);
+      }
+      main {
+        max-width: 520px;
+        margin: 0 auto;
+        display: grid;
+        gap: 16px;
+      }
+      .toolbar {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        align-items: center;
+        font-size: 13px;
+        color: var(--secondary-text-color);
+      }
+      .toolbar input[type='text'] {
+        flex: 1 1 260px;
+        font: inherit;
+      }
+      .toolbar input#reason {
+        flex: 1 1 120px;
+        min-width: 0;
+      }
+      .toolbar input[type='time'] {
+        font: inherit;
+      }
+      /* editor=1: the visual editor, on the dialog surface of HA's card editor. */
+      .editor-panel {
+        padding: 16px;
+        border-radius: var(--ha-card-border-radius, 12px);
+        background: var(--card-background-color);
+        box-shadow: var(--ha-card-box-shadow, none);
+      }
+      .editor-panel h2 {
+        margin: 0 0 16px;
+        font-size: 16px;
+        font-weight: 500;
+      }
+      /* Stand-in for HA's red hui-error-card (shown when setConfig throws). */
+      .error-card {
+        padding: 16px;
+        border-radius: var(--ha-card-border-radius, 12px);
+        background: var(--error-color);
+        color: #ffffff;
+        white-space: pre-wrap;
+      }
+      details {
+        font-size: 12px;
+        color: var(--secondary-text-color);
+      }
+      details code {
+        display: block;
+        margin-top: 4px;
+        word-break: break-word;
+      }
+      pre {
+        font-size: 12px;
+        white-space: pre-wrap;
+        color: var(--secondary-text-color);
+        max-height: 160px;
+        overflow: auto;
+        margin: 0;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <section id="editor-panel" class="editor-panel" hidden>
+        <h2>Éditeur visuel</h2>
+        <div id="editor-host"></div>
+      </section>
+      <div class="toolbar">
+        <label
+          >Preset
+          <select id="preset">
+            <option value="brightness">Luminosité (%)</option>
+            <option value="temperature">Température (°C)</option>
+            <option value="color_temp">Température de couleur (K)</option>
+            <option value="custom">Personnalisé (-5..5, pas 0,25)</option>
+          </select></label
+        >
+        <label><input type="checkbox" id="dark" /> Thème sombre</label>
+        <label><input type="checkbox" id="narrow" /> Largeur téléphone (360px)</label>
+        <label><input type="checkbox" id="active" checked /> Courbe active</label>
+        <label><input type="checkbox" id="override" /> Règle prioritaire</label>
+        <input
+          type="text"
+          id="reason"
+          spellcheck="false"
+          placeholder="raison (vide : aucune)"
+          aria-label="Raison de la règle prioritaire"
+        />
+      </div>
+      <div class="toolbar">
+        <label><input type="checkbox" id="freeze" /> Figer l'heure</label>
+        <input type="time" id="now" step="60" aria-label="Heure figée" />
+      </div>
+      <div class="toolbar">
+        <label><input type="checkbox" id="fail" /> Échec des enregistrements</label>
+        <label><input type="checkbox" id="latency" /> Latence 1,5 s</label>
+        <label><input type="checkbox" id="noecho" /> Sans écho (délai 5 s)</label>
+      </div>
+      <div class="toolbar">
+        <input type="text" id="curve" spellcheck="false" />
+        <button id="apply">Simuler changement externe</button>
+      </div>
+      <div id="host"></div>
+      <details>
+        <summary>Paramètres d'URL</summary>
+        <code
+          >preset=brightness|temperature|color_temp|custom (entités, plage, unité et appareil cible
+          du preset ; brightness par défaut) · theme=dark · narrow=1 · curve=19:00@100;23:30@12 ·
+          now=21:30 · sensor=57 · mode=none|curve (none = capteur sans attribut mode, affiche « ≠
+          courbe » si les valeurs diffèrent ; curve = mode curve imposé ; sensor et mode tiennent
+          jusqu'à la première interaction, le rafraîchissement de chaque minute les garde) ·
+          override=1 (règle prioritaire : capteur à 80 % / 16 °C / 3000 K / 0, mode override) ·
+          reason=texte (raison affichée par la carte ; vide = aucune, la carte affiche « Règle
+          prioritaire ») · active=0 (courbe désactivée : sa valeur la plus haute, mode override,
+          raison « Curve disabled » comme ha/example-package.yaml) · target=état de l'appareil cible
+          (on|off|unavailable pour la lampe, heat|off|unavailable pour le thermostat, missing =
+          entité absente ; light= est un alias) · brightness=0-255 (lampe) · current=19.5
+          (température actuelle du thermostat, vide = aucune) · window_start=17:00 ·
+          window_end=08:00 · fail=1 (les enregistrements échouent) · latency=300 (ms) · noecho=1 (le
+          service répond mais l'état ne change pas) · editor=1 (éditeur visuel au-dessus de la carte
+          : chaque config-changed est appliqué par setConfig)</code
+        >
+      </details>
+      <pre id="log"></pre>
+    </main>
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>

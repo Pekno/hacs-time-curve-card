@@ -1,0 +1,348 @@
+# =====================================================================
+#  time-curve-card: example Home Assistant package (brightness)
+#
+#  A complete, minimal package for the Lovelace card
+#  "custom:time-curve-card" drawing a brightness curve (1-100 %).
+#  Other examples: ha/example-heating-package.yaml (thermostat setpoint)
+#  and ha/example-color-temp-package.yaml (colour temperature). To use it:
+#    1. copy it into the packages/ folder next to configuration.yaml,
+#       e.g. /homeassistant/packages/brightness_curve.yaml
+#       (configuration.yaml -> homeassistant: packages: !include_dir_named packages);
+#    2. run "Check configuration" (YAML tab of the developer tools), then
+#       restart Home Assistant;
+#    3. turn input_boolean.brightness_curve_enabled on: a new input_boolean
+#       starts off (then Home Assistant restores its state across restarts);
+#    4. add the card (ha/example-dashboard-card.yaml) and draw a curve, or
+#       use the card's reset button to write the default curve.
+#  You may rename the entities: keep every reference below in sync.
+#
+#  What it contains:
+#  - input_text.brightness_curve stores the curve drawn in the card:
+#        HH:MM@V;HH:MM@V;...     e.g. 19:00@100;21:00@70;22:30@30;23:30@12
+#    (hour 0-23, minutes on 2 digits, value with at most 2 decimals, here
+#    a brightness clamped to 1-100 %).
+#  - input_boolean.brightness_curve_enabled ("Follow the curve"): when off,
+#    the sensor uses the curve's highest point instead. It is an example of an
+#    override rule; remove it (and its branches below) if you do not need it.
+#  - sensor.brightness_curve_target reads the same string and computes the
+#    brightness for the current time (linear interpolation rounded to the
+#    step; the "curve day" runs from 12:00 to 12:00 the next day, so a
+#    curve can cross midnight). The card computes EXACTLY the same
+#    value: what you see is what the light does (both sides pass the same
+#    test cases, test/fixtures/curve-cases.json). The sensor re-renders every
+#    minute because it uses now().
+#  - An optional automation (commented out at the end) that pushes the target
+#    brightness to a light while it is on.
+#
+#  Sensor attributes read by the card (target_sensor option):
+#  - mode:   "curve" when the value follows the curve, "override" when a
+#            higher-priority rule decides it;
+#  - reason: why, in your own words, shown as plain text by the card next to
+#            the sensor value, on one line (whitespace runs, line breaks
+#            included, collapse to one space; null when mode is "curve").
+# =====================================================================
+
+input_text:
+  brightness_curve:
+    # Written by the card. max: 255 is required (the default is 100; 255 is
+    # Home Assistant's hard limit). Do NOT add "initial:": Home Assistant
+    # would reset the curve to it on every restart instead of restoring the
+    # curve you drew.
+    name: "Brightness curve"
+    min: 0
+    max: 255
+    mode: text
+    icon: mdi:chart-bell-curve-cumulative
+
+input_boolean:
+  brightness_curve_enabled:
+    name: "Follow the curve"
+    icon: mdi:chart-bell-curve-cumulative
+
+# Sensor priority rules:
+#   1. curve disabled (input_boolean off) -> the curve's highest point
+#      (mode "override", reason "Curve disabled");
+#   2. otherwise                          -> the curve's value right now
+#      (mode "curve", no reason);
+#   3. invalid curve (fewer than 2 valid points) or input_text without a
+#      value -> sensor unavailable (whatever the input_boolean says).
+#
+# Adding your own override rule
+# -----------------------------
+# A rule checked BEFORE the curve decides the value on its own, e.g. "while
+# the house is in away mode, keep a fixed brightness" (with an alarm panel,
+# test its state instead of the boolean). With a helper
+# input_boolean.away_mode and a level input_number.away_brightness (1-100),
+# put the rule first in each of the four templates of the sensor:
+#
+#   availability (after the parse block):
+#     {% if is_state('input_boolean.away_mode', 'on') %}
+#       {{ has_value('input_number.away_brightness') }}
+#     {% else %}
+#       {{ has_value('input_text.brightness_curve') and curve | length >= 2 }}
+#     {% endif %}
+#   state (after the parse block, the existing chain becomes "elif"; r.v is
+#   the value in hundredths, so a whole percentage is multiplied by 100):
+#     {% if is_state('input_boolean.away_mode', 'on') %}
+#       {% set r.v = (states('input_number.away_brightness') | float(100) | int) * 100 %}
+#     {% elif curve | length < 2 %}
+#       ... (the rest unchanged)
+#   mode:
+#     {% if is_state('input_boolean.away_mode', 'on')
+#           or is_state('input_boolean.brightness_curve_enabled', 'off') %}
+#       override
+#     {% else %}
+#       curve
+#     {% endif %}
+#   reason:
+#     {% if is_state('input_boolean.away_mode', 'on') %}
+#       Away mode
+#     {% elif is_state('input_boolean.brightness_curve_enabled', 'off') %}
+#       ... (the rest unchanged)
+#
+# Keep mode "curve" and no reason for the branch that follows the curve: the
+# card then adds no explanation (both values match). Never touch the parse
+# block, the interpolation or the formatting: they are the tested twin of the
+# card's code. The range constants vmin / vmax / vstep at the top of the
+# parse block (in hundredths of a unit: 100 = 1 %) must match the card's
+# min / max / step (the brightness preset: 1, 100, 1).
+template:
+  - sensor:
+      - name: "Brightness curve target"
+        unique_id: brightness_curve_target
+        unit_of_measurement: "%"
+        icon: mdi:lightbulb-auto
+        # Available when the curve has a value AND at least 2 valid points.
+        # The parse block is IDENTICAL in availability and state (a test
+        # checks it): change one only together with the other.
+        availability: >
+          {# --- parse: begin --- #}
+          {# Value range in hundredths of a unit: 1 % -> 100, 100 % -> 10000, #}
+          {#   step 1 % -> 100 (same as the card's min / max / step) #}
+          {% set vmin = 100 %}
+          {% set vmax = 10000 %}
+          {% set vstep = 100 %}
+          {# Step 1: read the text (unknown / unavailable / missing = empty curve) #}
+          {% set text = states('input_text.brightness_curve')
+                        if has_value('input_text.brightness_curve') else '' %}
+          {% set ns = namespace(pairs=[]) %}
+          {# Step 2: split into "HH:MM@V" tokens separated by ";" #}
+          {% for token in text.split(';') %}
+            {# 2a: strip only spaces and tabs around the token #}
+            {% set tok = token.strip(' \t') %}
+            {% if tok == '' %}{% continue %}{% endif %}
+            {# 2b: overall shape, exactly one "@" and one ":" before it #}
+            {% set at_parts = tok.split('@') %}
+            {% if at_parts | length != 2 %}{% continue %}{% endif %}
+            {% set hm_parts = at_parts[0].split(':') %}
+            {% if hm_parts | length != 2 %}{% continue %}{% endif %}
+            {% set h_txt = hm_parts[0] %}
+            {% set m_txt = hm_parts[1] %}
+            {# 2c: value V = optional "-", integer part, optional "." + decimals #}
+            {% set v_txt = at_parts[1] %}
+            {% set neg = v_txt[:1] == '-' %}
+            {% set v_parts = (v_txt[1:] if neg else v_txt).split('.') %}
+            {% if v_parts | length > 2 %}{% continue %}{% endif %}
+            {% set i_txt = v_parts[0] %}
+            {% set f_txt = v_parts[1] if v_parts | length == 2 else '' %}
+            {# 2d: digit counts: hour 1-2, minutes exactly 2, integer part 1-4, #}
+            {#     decimals 1-2 when there is a "." #}
+            {% set h_len = h_txt | length %}
+            {% set i_len = i_txt | length %}
+            {% set f_len = f_txt | length %}
+            {% if h_len < 1 or h_len > 2 or m_txt | length != 2 or i_len < 1 or i_len > 4
+                  or (v_parts | length == 2 and (f_len < 1 or f_len > 2)) %}{% continue %}{% endif %}
+            {# 2e: ASCII digits 0-9 only, checked one by one BEFORE int: #}
+            {#     HA's int filter would accept ' 70', '+70', '1e2' or full-width digits #}
+            {% set chk = namespace(ok=true) %}
+            {% for c in h_txt ~ m_txt ~ i_txt ~ f_txt %}
+              {% if c not in '0123456789' %}{% set chk.ok = false %}{% endif %}
+            {% endfor %}
+            {% if not chk.ok %}{% continue %}{% endif %}
+            {# 2f: convert; hour 0-23 and minutes 0-59 (24:00 and 19:60 rejected) #}
+            {% set h = h_txt | int(0) %}
+            {% set m = m_txt | int(0) %}
+            {% if h > 23 or m > 59 %}{% continue %}{% endif %}
+            {# 2g: value in hundredths built from the digits, never through a float: #}
+            {#     "19.5" -> 1950, "-2.05" -> -205, "70" -> 7000 #}
+            {% set mag = (i_txt | int(0)) * 100 + ((f_txt ~ '00')[:2] | int(0)) %}
+            {% set v = 0 - mag if neg else mag %}
+            {# 2h: value clamped to the range (e.g. 0 -> 1 %, 150 -> 100 %) #}
+            {% set v = vmin if v < vmin else (vmax if v > vmax else v) %}
+            {# 2i: key = position in the 12:00 -> 12:00 curve day #}
+            {#     (12:00 = 0, 23:59 = 719, 00:00 = 720, 11:59 = 1439) #}
+            {% set pos = (h * 60 + m - 720) % 1440 %}
+            {% set ns.pairs = ns.pairs + [(pos, v)] %}
+          {% endfor %}
+          {# Step 3: dict() keeps the LAST value of a duplicate time, then #}
+          {#   dictsort sorts by key, i.e. in the curve day (11:00 comes AFTER 23:00). #}
+          {#   curve = [(position, value in hundredths), ...] #}
+          {% set curve = dict(ns.pairs) | dictsort %}
+          {# --- parse: end --- #}
+          {{ has_value('input_text.brightness_curve') and curve | length >= 2 }}
+        state: >
+          {# --- parse: begin --- #}
+          {# Value range in hundredths of a unit: 1 % -> 100, 100 % -> 10000, #}
+          {#   step 1 % -> 100 (same as the card's min / max / step) #}
+          {% set vmin = 100 %}
+          {% set vmax = 10000 %}
+          {% set vstep = 100 %}
+          {# Step 1: read the text (unknown / unavailable / missing = empty curve) #}
+          {% set text = states('input_text.brightness_curve')
+                        if has_value('input_text.brightness_curve') else '' %}
+          {% set ns = namespace(pairs=[]) %}
+          {# Step 2: split into "HH:MM@V" tokens separated by ";" #}
+          {% for token in text.split(';') %}
+            {# 2a: strip only spaces and tabs around the token #}
+            {% set tok = token.strip(' \t') %}
+            {% if tok == '' %}{% continue %}{% endif %}
+            {# 2b: overall shape, exactly one "@" and one ":" before it #}
+            {% set at_parts = tok.split('@') %}
+            {% if at_parts | length != 2 %}{% continue %}{% endif %}
+            {% set hm_parts = at_parts[0].split(':') %}
+            {% if hm_parts | length != 2 %}{% continue %}{% endif %}
+            {% set h_txt = hm_parts[0] %}
+            {% set m_txt = hm_parts[1] %}
+            {# 2c: value V = optional "-", integer part, optional "." + decimals #}
+            {% set v_txt = at_parts[1] %}
+            {% set neg = v_txt[:1] == '-' %}
+            {% set v_parts = (v_txt[1:] if neg else v_txt).split('.') %}
+            {% if v_parts | length > 2 %}{% continue %}{% endif %}
+            {% set i_txt = v_parts[0] %}
+            {% set f_txt = v_parts[1] if v_parts | length == 2 else '' %}
+            {# 2d: digit counts: hour 1-2, minutes exactly 2, integer part 1-4, #}
+            {#     decimals 1-2 when there is a "." #}
+            {% set h_len = h_txt | length %}
+            {% set i_len = i_txt | length %}
+            {% set f_len = f_txt | length %}
+            {% if h_len < 1 or h_len > 2 or m_txt | length != 2 or i_len < 1 or i_len > 4
+                  or (v_parts | length == 2 and (f_len < 1 or f_len > 2)) %}{% continue %}{% endif %}
+            {# 2e: ASCII digits 0-9 only, checked one by one BEFORE int: #}
+            {#     HA's int filter would accept ' 70', '+70', '1e2' or full-width digits #}
+            {% set chk = namespace(ok=true) %}
+            {% for c in h_txt ~ m_txt ~ i_txt ~ f_txt %}
+              {% if c not in '0123456789' %}{% set chk.ok = false %}{% endif %}
+            {% endfor %}
+            {% if not chk.ok %}{% continue %}{% endif %}
+            {# 2f: convert; hour 0-23 and minutes 0-59 (24:00 and 19:60 rejected) #}
+            {% set h = h_txt | int(0) %}
+            {% set m = m_txt | int(0) %}
+            {% if h > 23 or m > 59 %}{% continue %}{% endif %}
+            {# 2g: value in hundredths built from the digits, never through a float: #}
+            {#     "19.5" -> 1950, "-2.05" -> -205, "70" -> 7000 #}
+            {% set mag = (i_txt | int(0)) * 100 + ((f_txt ~ '00')[:2] | int(0)) %}
+            {% set v = 0 - mag if neg else mag %}
+            {# 2h: value clamped to the range (e.g. 0 -> 1 %, 150 -> 100 %) #}
+            {% set v = vmin if v < vmin else (vmax if v > vmax else v) %}
+            {# 2i: key = position in the 12:00 -> 12:00 curve day #}
+            {#     (12:00 = 0, 23:59 = 719, 00:00 = 720, 11:59 = 1439) #}
+            {% set pos = (h * 60 + m - 720) % 1440 %}
+            {% set ns.pairs = ns.pairs + [(pos, v)] %}
+          {% endfor %}
+          {# Step 3: dict() keeps the LAST value of a duplicate time, then #}
+          {#   dictsort sorts by key, i.e. in the curve day (11:00 comes AFTER 23:00). #}
+          {#   curve = [(position, value in hundredths), ...] #}
+          {% set curve = dict(ns.pairs) | dictsort %}
+          {# --- parse: end --- #}
+          {# r.v = the value in hundredths; none = unavailable #}
+          {% set r = namespace(v=none) %}
+          {% if curve | length < 2 %}
+            {# Rule 3: invalid curve -> sensor unavailable (see availability) #}
+            {# Only a guard: availability is then false, and Home Assistant #}
+            {# renders neither the state nor the attributes of an unavailable sensor #}
+          {% elif is_state('input_boolean.brightness_curve_enabled', 'off') %}
+            {# Rule 1: curve disabled -> its highest point #}
+            {% set r.v = curve | map(attribute=1) | max %}
+          {% else %}
+            {# Rule 2: the curve's value at the current time (seconds ignored) #}
+            {# now() read ONCE (otherwise hour and minute may come from 2 different minutes) #}
+            {% set t = now() %}
+            {% set k = (t.hour * 60 + t.minute - 720) % 1440 %}
+            {% set k_first, v_first = curve[0] %}
+            {% set k_last, v_last = curve[-1] %}
+            {% if k <= k_first %}
+              {# before the first point (afternoon) -> value of the first point #}
+              {% set r.v = v_first %}
+            {% elif k >= k_last %}
+              {# after the last point (night, e.g. 3 a.m.) -> value of the last point #}
+              {% set r.v = v_last %}
+            {% else %}
+              {# between two points: the segment ka <= k < kb #}
+              {% for i in range((curve | length) - 1) %}
+                {% set ka, a = curve[i] %}
+                {% set kb, b = curve[i + 1] %}
+                {% if ka <= k and k < kb %}
+                  {% if k == ka %}
+                    {# exactly on a point -> its value as stored #}
+                    {% set r.v = a %}
+                  {% else %}
+                    {# linear interpolation in EXACT integers (no float, like the card): #}
+                    {# the value is n / d hundredths, rounded half up to a multiple of #}
+                    {# vstep with Python's floor division //, then clamped to the range #}
+                    {% set d = kb - ka %}
+                    {% set n = a * d + (b - a) * (k - ka) %}
+                    {% set q = ((2 * n + d * vstep) // (2 * d * vstep)) * vstep %}
+                    {% set r.v = vmin if q < vmin else (vmax if q > vmax else q) %}
+                  {% endif %}
+                  {% break %}
+                {% endif %}
+              {% endfor %}
+            {% endif %}
+          {% endif %}
+          {# Format the hundredths without a float: 1950 -> 19.5, 7000 -> 70, -205 -> -2.05 #}
+          {% if r.v is none %}
+            none
+          {% else %}
+            {% set av = 0 - r.v if r.v < 0 else r.v %}
+            {% set fr = av % 100 %}
+            {{ ('-' if r.v < 0 else '') ~ (av // 100)
+               ~ ('' if fr == 0 else '.' ~ (fr // 10) ~ ('' if fr % 10 == 0 else fr % 10)) }}
+          {% endif %}
+        attributes:
+          # Why the value may differ from the curve (read by the card):
+          # "override" when a higher-priority rule decides, "curve" otherwise.
+          mode: >
+            {% if is_state('input_boolean.brightness_curve_enabled', 'off') %}
+              override
+            {% else %}
+              curve
+            {% endif %}
+          # Shown as plain text by the card next to the sensor value (whitespace
+          # collapsed), in your own language. {{ none }} publishes a null
+          # attribute: no reason in mode curve.
+          reason: >
+            {% if is_state('input_boolean.brightness_curve_enabled', 'off') %}
+              Curve disabled
+            {% else %}
+              {{ none }}
+            {% endif %}
+
+# Optional: make a light follow the target while it is on. Uncomment it and
+# replace light.your_light by your light. To apply the target when the light
+# is switched on, use this value in your own turn-on actions:
+#   brightness_pct: "{{ states('sensor.brightness_curve_target') | int(100) }}"
+# Many Zigbee bulbs ignore very low brightness (often below 3 %): keep the
+# curve's lowest point above what your bulb accepts. A point typed with
+# decimals (e.g. 12.5) is published as is; "| int" keeps its whole part.
+#
+# automation:
+#   - id: brightness_curve_follow
+#     alias: "Follow the brightness curve"
+#     description: "Pushes the target brightness to the light while it is on"
+#     mode: restart
+#     triggers:
+#       - trigger: state
+#         entity_id: sensor.brightness_curve_target
+#         not_from: [unknown, unavailable]
+#         not_to: [unknown, unavailable]
+#     conditions:
+#       - condition: state
+#         entity_id: light.your_light
+#         state: "on"
+#     actions:
+#       - action: light.turn_on
+#         target:
+#           entity_id: light.your_light
+#         data:
+#           brightness_pct: "{{ trigger.to_state.state | int }}"
+#           transition: 20

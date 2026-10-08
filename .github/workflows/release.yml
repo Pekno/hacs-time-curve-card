@@ -1,0 +1,118 @@
+# Pushing a version tag ("vX.Y.Z" or "X.Y.Z", equal to the "version" of package.json, which the
+# build writes into the console banner) checks the tag, runs every gate, builds the card and only
+# THEN creates the GitHub release, with dist/time-curve-card.js attached: gh creates it as a
+# draft, uploads the asset and publishes it. HACS reads the newest release and downloads that
+# asset (hacs.json "filename"; dist/ is not committed), so it never sees a release without the
+# card, and a failed gate publishes nothing. This order also works with GitHub's "immutable
+# releases" setting.
+#
+# A tag with a pre-release suffix ("v1.2.3-beta.1") gives a pre-release, which HACS only offers
+# to users who enabled beta versions. A release that already exists for the tag (a re-run, or one
+# created by hand) gets the asset when it lacks it (an existing asset is never replaced: gh
+# --clobber deletes it before uploading the new one), and a draft is then published.
+#
+# Actions > Release > Run workflow releases an existing tag by hand (e.g. a tag pushed together
+# with more than three others, which GitHub does not report as a push).
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+*'
+      - '[0-9]+.[0-9]+.[0-9]+*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing version tag to release, e.g. v1.2.3'
+        required: true
+        type: string
+
+permissions: {}
+
+concurrency:
+  group: release-${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  build-and-release:
+    name: Build the card and publish the release
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    env:
+      # Passed through the environment, never interpolated into a script.
+      RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+    steps:
+      # No step needs git credentials: the token is not left in the git config while npm ci runs
+      # the install scripts of the dependencies. Only the last step gets it (GH_TOKEN).
+      - name: Check out the tag
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && format('refs/tags/{0}', inputs.tag) || github.ref }}
+          persist-credentials: false
+
+      # No dependency cache in a job that can write releases (cache poisoning).
+      - name: Set up Node 24
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          package-manager-cache: false
+
+      - name: Check that the tag matches package.json
+        run: node scripts/check-version.mjs "$RELEASE_TAG"
+
+      # No floating major tag since setup-uv v8: pinned to a full (immutable) version. Its cache
+      # is off here too ("auto" skips it on tag pushes, but not on a manual run).
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v10.2.0
+        with:
+          enable-cache: false
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Format check
+        run: npm run format:check
+
+      - name: Unit tests
+        run: npm test
+
+      - name: Jinja sensor tests
+        run: uv run --locked pytest test/jinja
+
+      - name: Build
+        run: npm run build
+
+      - name: Publish the release with the card attached
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          asset=dist/time-curve-card.js
+          name=$(basename "$asset")
+          prerelease=false
+          case "$RELEASE_TAG" in *-*) prerelease=true ;; esac
+          if ! draft=$(gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" \
+              --json isDraft --jq .isDraft 2>/dev/null); then
+            # No release yet: gh creates a draft, uploads the asset, then publishes the release.
+            gh release create "$RELEASE_TAG" "$asset" --repo "$GITHUB_REPOSITORY" \
+              --verify-tag --generate-notes --prerelease="$prerelease"
+            exit 0
+          fi
+          assets=$(gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" \
+            --json assets --jq '.assets[].name')
+          if grep -qxF "$name" <<<"$assets"; then
+            echo "The release $RELEASE_TAG already carries $name: left as it is."
+          else
+            gh release upload "$RELEASE_TAG" "$asset" --repo "$GITHUB_REPOSITORY"
+          fi
+          if [ "$draft" = "true" ]; then
+            gh release edit "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --draft=false
+          fi

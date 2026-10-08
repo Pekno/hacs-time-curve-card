@@ -1,0 +1,19 @@
+node_modules/
+.venv/
+.vite/
+coverage/
+__pycache__/
+.pytest_cache/
+*.log
+.DS_Store
+.env
+.env.local
+# Screenshots of scripts/screenshot.mjs and scripts/e2e-touch.mjs (default --out)
+shots/
+# Build output (npm run build). Not committed: .github/workflows/release.yml builds it and
+# creates each GitHub release with dist/time-curve-card.js attached, where HACS downloads it.
+dist/
+
+# Owner-specific files: never published (see CLAUDE.md, "Private area")
+private/
+CLAUDE.local.md

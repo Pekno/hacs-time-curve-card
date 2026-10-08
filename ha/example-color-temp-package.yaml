@@ -1,0 +1,278 @@
+# =====================================================================
+#  time-curve-card: example Home Assistant package (colour temperature)
+#
+#  A daily colour temperature curve (2000-6500 K, step 50 K) drawn in the
+#  Lovelace card (ha/example-dashboard-color-temp-card.yaml): cool light in
+#  the afternoon, warm light late at night. The smallest possible
+#  package: no override rule, the sensor always follows the curve. Same
+#  contract as the brightness example (ha/example-package.yaml). To use it:
+#    1. copy it into the packages/ folder next to configuration.yaml,
+#       e.g. /homeassistant/packages/color_temp_curve.yaml
+#       (configuration.yaml -> homeassistant: packages: !include_dir_named packages);
+#    2. run "Check configuration" (YAML tab of the developer tools), then
+#       restart Home Assistant;
+#    3. add the card and draw a curve, or use the card's reset button to
+#       write its default curve.
+#  You may rename the entities: keep every reference below in sync.
+#
+#  What it contains:
+#  - input_text.color_temp_curve stores the curve drawn in the card:
+#        HH:MM@V;HH:MM@V;...     e.g. 17:00@4000;21:00@2700;23:00@2200
+#    (hour 0-23, minutes on 2 digits, colour temperature in kelvin, clamped
+#    to 2000-6500 K).
+#  - sensor.color_temp_curve_target reads the same string and computes the
+#    colour temperature for the current time: linear interpolation rounded
+#    (half up) to the 50 K step; the "curve day" runs from 12:00 to 12:00 the
+#    next day, so a curve can cross midnight. The card computes
+#    EXACTLY the same value (both sides pass the same test cases,
+#    test/fixtures/curve-cases.json). The sensor re-renders every minute
+#    because it uses now().
+#  - An optional automation (commented out at the end) that pushes the colour
+#    temperature to a light while it is on.
+#  To add an override rule (a "mode: override" branch with a "reason"), see
+#  ha/example-package.yaml and ha/example-heating-package.yaml.
+#
+#  Keep the range inside what your light supports (its min_color_temp_kelvin
+#  and max_color_temp_kelvin attributes).
+# =====================================================================
+
+input_text:
+  color_temp_curve:
+    # Written by the card. max: 255 is required (the default is 100; 255 is
+    # Home Assistant's hard limit). Do NOT add "initial:": Home Assistant
+    # would reset the curve to it on every restart instead of restoring the
+    # curve you drew.
+    name: "Colour temperature curve"
+    min: 0
+    max: 255
+    mode: text
+    icon: mdi:chart-bell-curve-cumulative
+
+# Sensor rules:
+#   1. the curve's value right now (mode "curve", no reason);
+#   2. invalid curve (fewer than 2 valid points) or input_text without a
+#      value -> sensor unavailable.
+# Never touch the parse block, the interpolation or the formatting: they are
+# the tested twin of the card's code. The range constants vmin / vmax / vstep
+# at the top of the parse block (in hundredths of a kelvin: 200000 = 2000 K)
+# must match the card's min / max / step (the colour temperature preset:
+# 2000, 6500, 50).
+template:
+  - sensor:
+      - name: "Colour temperature curve target"
+        unique_id: color_temp_curve_target
+        unit_of_measurement: "K"
+        icon: mdi:thermometer-lines
+        # Available when the curve has a value AND at least 2 valid points.
+        # The parse block is IDENTICAL in availability and state (a test
+        # checks it): change one only together with the other.
+        availability: >
+          {# --- parse: begin --- #}
+          {# Value range in hundredths of a unit: 2000 K -> 200000, 6500 K -> 650000, #}
+          {#   step 50 K -> 5000 (same as the card's min / max / step) #}
+          {% set vmin = 200000 %}
+          {% set vmax = 650000 %}
+          {% set vstep = 5000 %}
+          {# Step 1: read the text (unknown / unavailable / missing = empty curve) #}
+          {% set text = states('input_text.color_temp_curve')
+                        if has_value('input_text.color_temp_curve') else '' %}
+          {% set ns = namespace(pairs=[]) %}
+          {# Step 2: split into "HH:MM@V" tokens separated by ";" #}
+          {% for token in text.split(';') %}
+            {# 2a: strip only spaces and tabs around the token #}
+            {% set tok = token.strip(' \t') %}
+            {% if tok == '' %}{% continue %}{% endif %}
+            {# 2b: overall shape, exactly one "@" and one ":" before it #}
+            {% set at_parts = tok.split('@') %}
+            {% if at_parts | length != 2 %}{% continue %}{% endif %}
+            {% set hm_parts = at_parts[0].split(':') %}
+            {% if hm_parts | length != 2 %}{% continue %}{% endif %}
+            {% set h_txt = hm_parts[0] %}
+            {% set m_txt = hm_parts[1] %}
+            {# 2c: value V = optional "-", integer part, optional "." + decimals #}
+            {% set v_txt = at_parts[1] %}
+            {% set neg = v_txt[:1] == '-' %}
+            {% set v_parts = (v_txt[1:] if neg else v_txt).split('.') %}
+            {% if v_parts | length > 2 %}{% continue %}{% endif %}
+            {% set i_txt = v_parts[0] %}
+            {% set f_txt = v_parts[1] if v_parts | length == 2 else '' %}
+            {# 2d: digit counts: hour 1-2, minutes exactly 2, integer part 1-4, #}
+            {#     decimals 1-2 when there is a "." #}
+            {% set h_len = h_txt | length %}
+            {% set i_len = i_txt | length %}
+            {% set f_len = f_txt | length %}
+            {% if h_len < 1 or h_len > 2 or m_txt | length != 2 or i_len < 1 or i_len > 4
+                  or (v_parts | length == 2 and (f_len < 1 or f_len > 2)) %}{% continue %}{% endif %}
+            {# 2e: ASCII digits 0-9 only, checked one by one BEFORE int: #}
+            {#     HA's int filter would accept ' 70', '+70', '1e2' or full-width digits #}
+            {% set chk = namespace(ok=true) %}
+            {% for c in h_txt ~ m_txt ~ i_txt ~ f_txt %}
+              {% if c not in '0123456789' %}{% set chk.ok = false %}{% endif %}
+            {% endfor %}
+            {% if not chk.ok %}{% continue %}{% endif %}
+            {# 2f: convert; hour 0-23 and minutes 0-59 (24:00 and 19:60 rejected) #}
+            {% set h = h_txt | int(0) %}
+            {% set m = m_txt | int(0) %}
+            {% if h > 23 or m > 59 %}{% continue %}{% endif %}
+            {# 2g: value in hundredths built from the digits, never through a float: #}
+            {#     "2700" -> 270000, "2700.5" -> 270050 #}
+            {% set mag = (i_txt | int(0)) * 100 + ((f_txt ~ '00')[:2] | int(0)) %}
+            {% set v = 0 - mag if neg else mag %}
+            {# 2h: value clamped to the range (e.g. 1500 -> 2000 K, 9000 -> 6500 K) #}
+            {% set v = vmin if v < vmin else (vmax if v > vmax else v) %}
+            {# 2i: key = position in the 12:00 -> 12:00 curve day #}
+            {#     (12:00 = 0, 23:59 = 719, 00:00 = 720, 11:59 = 1439) #}
+            {% set pos = (h * 60 + m - 720) % 1440 %}
+            {% set ns.pairs = ns.pairs + [(pos, v)] %}
+          {% endfor %}
+          {# Step 3: dict() keeps the LAST value of a duplicate time, then #}
+          {#   dictsort sorts by key, i.e. in the curve day (11:00 comes AFTER 23:00). #}
+          {#   curve = [(position, value in hundredths), ...] #}
+          {% set curve = dict(ns.pairs) | dictsort %}
+          {# --- parse: end --- #}
+          {{ has_value('input_text.color_temp_curve') and curve | length >= 2 }}
+        state: >
+          {# --- parse: begin --- #}
+          {# Value range in hundredths of a unit: 2000 K -> 200000, 6500 K -> 650000, #}
+          {#   step 50 K -> 5000 (same as the card's min / max / step) #}
+          {% set vmin = 200000 %}
+          {% set vmax = 650000 %}
+          {% set vstep = 5000 %}
+          {# Step 1: read the text (unknown / unavailable / missing = empty curve) #}
+          {% set text = states('input_text.color_temp_curve')
+                        if has_value('input_text.color_temp_curve') else '' %}
+          {% set ns = namespace(pairs=[]) %}
+          {# Step 2: split into "HH:MM@V" tokens separated by ";" #}
+          {% for token in text.split(';') %}
+            {# 2a: strip only spaces and tabs around the token #}
+            {% set tok = token.strip(' \t') %}
+            {% if tok == '' %}{% continue %}{% endif %}
+            {# 2b: overall shape, exactly one "@" and one ":" before it #}
+            {% set at_parts = tok.split('@') %}
+            {% if at_parts | length != 2 %}{% continue %}{% endif %}
+            {% set hm_parts = at_parts[0].split(':') %}
+            {% if hm_parts | length != 2 %}{% continue %}{% endif %}
+            {% set h_txt = hm_parts[0] %}
+            {% set m_txt = hm_parts[1] %}
+            {# 2c: value V = optional "-", integer part, optional "." + decimals #}
+            {% set v_txt = at_parts[1] %}
+            {% set neg = v_txt[:1] == '-' %}
+            {% set v_parts = (v_txt[1:] if neg else v_txt).split('.') %}
+            {% if v_parts | length > 2 %}{% continue %}{% endif %}
+            {% set i_txt = v_parts[0] %}
+            {% set f_txt = v_parts[1] if v_parts | length == 2 else '' %}
+            {# 2d: digit counts: hour 1-2, minutes exactly 2, integer part 1-4, #}
+            {#     decimals 1-2 when there is a "." #}
+            {% set h_len = h_txt | length %}
+            {% set i_len = i_txt | length %}
+            {% set f_len = f_txt | length %}
+            {% if h_len < 1 or h_len > 2 or m_txt | length != 2 or i_len < 1 or i_len > 4
+                  or (v_parts | length == 2 and (f_len < 1 or f_len > 2)) %}{% continue %}{% endif %}
+            {# 2e: ASCII digits 0-9 only, checked one by one BEFORE int: #}
+            {#     HA's int filter would accept ' 70', '+70', '1e2' or full-width digits #}
+            {% set chk = namespace(ok=true) %}
+            {% for c in h_txt ~ m_txt ~ i_txt ~ f_txt %}
+              {% if c not in '0123456789' %}{% set chk.ok = false %}{% endif %}
+            {% endfor %}
+            {% if not chk.ok %}{% continue %}{% endif %}
+            {# 2f: convert; hour 0-23 and minutes 0-59 (24:00 and 19:60 rejected) #}
+            {% set h = h_txt | int(0) %}
+            {% set m = m_txt | int(0) %}
+            {% if h > 23 or m > 59 %}{% continue %}{% endif %}
+            {# 2g: value in hundredths built from the digits, never through a float: #}
+            {#     "2700" -> 270000, "2700.5" -> 270050 #}
+            {% set mag = (i_txt | int(0)) * 100 + ((f_txt ~ '00')[:2] | int(0)) %}
+            {% set v = 0 - mag if neg else mag %}
+            {# 2h: value clamped to the range (e.g. 1500 -> 2000 K, 9000 -> 6500 K) #}
+            {% set v = vmin if v < vmin else (vmax if v > vmax else v) %}
+            {# 2i: key = position in the 12:00 -> 12:00 curve day #}
+            {#     (12:00 = 0, 23:59 = 719, 00:00 = 720, 11:59 = 1439) #}
+            {% set pos = (h * 60 + m - 720) % 1440 %}
+            {% set ns.pairs = ns.pairs + [(pos, v)] %}
+          {% endfor %}
+          {# Step 3: dict() keeps the LAST value of a duplicate time, then #}
+          {#   dictsort sorts by key, i.e. in the curve day (11:00 comes AFTER 23:00). #}
+          {#   curve = [(position, value in hundredths), ...] #}
+          {% set curve = dict(ns.pairs) | dictsort %}
+          {# --- parse: end --- #}
+          {# r.v = the value in hundredths; none = unavailable #}
+          {% set r = namespace(v=none) %}
+          {% if curve | length >= 2 %}
+            {# Rule 1: the curve's value at the current time (seconds ignored) #}
+            {# now() read ONCE (otherwise hour and minute may come from 2 different minutes) #}
+            {% set t = now() %}
+            {% set k = (t.hour * 60 + t.minute - 720) % 1440 %}
+            {% set k_first, v_first = curve[0] %}
+            {% set k_last, v_last = curve[-1] %}
+            {% if k <= k_first %}
+              {# before the first point -> value of the first point #}
+              {% set r.v = v_first %}
+            {% elif k >= k_last %}
+              {# after the last point -> value of the last point #}
+              {% set r.v = v_last %}
+            {% else %}
+              {# between two points: the segment ka <= k < kb #}
+              {% for i in range((curve | length) - 1) %}
+                {% set ka, a = curve[i] %}
+                {% set kb, b = curve[i + 1] %}
+                {% if ka <= k and k < kb %}
+                  {% if k == ka %}
+                    {# exactly on a point -> its value as stored #}
+                    {% set r.v = a %}
+                  {% else %}
+                    {# linear interpolation in EXACT integers (no float, like the card): #}
+                    {# the value is n / d hundredths, rounded half up to a multiple of #}
+                    {# vstep with Python's floor division //, then clamped to the range #}
+                    {% set d = kb - ka %}
+                    {% set n = a * d + (b - a) * (k - ka) %}
+                    {% set q = ((2 * n + d * vstep) // (2 * d * vstep)) * vstep %}
+                    {% set r.v = vmin if q < vmin else (vmax if q > vmax else q) %}
+                  {% endif %}
+                  {% break %}
+                {% endif %}
+              {% endfor %}
+            {% endif %}
+          {% endif %}
+          {# Rule 2: invalid curve -> r.v stays none, the sensor is unavailable #}
+          {# Format the hundredths without a float: 270000 -> 2700, 270050 -> 2700.5 #}
+          {% if r.v is none %}
+            none
+          {% else %}
+            {% set av = 0 - r.v if r.v < 0 else r.v %}
+            {% set fr = av % 100 %}
+            {{ ('-' if r.v < 0 else '') ~ (av // 100)
+               ~ ('' if fr == 0 else '.' ~ (fr // 10) ~ ('' if fr % 10 == 0 else fr % 10)) }}
+          {% endif %}
+        attributes:
+          # This package has no override rule: the sensor always follows the
+          # curve (read by the card: no explanation next to the value).
+          mode: >
+            curve
+          reason: >
+            {{ none }}
+
+# Optional: make a light follow the colour temperature while it is on.
+# Uncomment it and replace light.your_light by your light (it must support
+# colour temperature).
+#
+# automation:
+#   - id: color_temp_curve_follow
+#     alias: "Follow the colour temperature curve"
+#     description: "Pushes the target colour temperature to the light while it is on"
+#     mode: restart
+#     triggers:
+#       - trigger: state
+#         entity_id: sensor.color_temp_curve_target
+#         not_from: [unknown, unavailable]
+#         not_to: [unknown, unavailable]
+#     conditions:
+#       - condition: state
+#         entity_id: light.your_light
+#         state: "on"
+#     actions:
+#       - action: light.turn_on
+#         target:
+#           entity_id: light.your_light
+#         data:
+#           color_temp_kelvin: "{{ trigger.to_state.state | int }}"
+#           transition: 20

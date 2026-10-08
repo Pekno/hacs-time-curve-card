@@ -1,0 +1,1220 @@
+{
+  "description": "Single source of truth for curve semantics; run by test/curve.test.ts AND test/jinja/test_sensor.py",
+  "$comment": "v2: expected / canonical / max are strings in the canonical value format ('25', '19.5', '-2.05') or null (invalid curve). A case may carry range [minCenti, maxCenti] and step (centi-units, hundredths of a unit); the defaults are the brightness range [100, 10000] and step 100, so every v1 case keeps its meaning. The Jinja harness runs a case against a package only when the case's range and step equal the package's.",
+  "cases": [
+    {
+      "name": "mid-segment-simple",
+      "curve": "19:00@100;21:00@70",
+      "time": "20:00",
+      "expected": "85",
+      "canonical": "19:00@100;21:00@70",
+      "max": "100",
+      "note": "linear midpoint"
+    },
+    {
+      "name": "before-first-point-holds-first-value",
+      "curve": "19:00@100;21:00@70",
+      "time": "18:00",
+      "expected": "100",
+      "canonical": "19:00@100;21:00@70",
+      "max": "100"
+    },
+    {
+      "name": "after-last-point-holds-last-value-at-03-00",
+      "curve": "19:00@100;21:00@70",
+      "time": "03:00",
+      "expected": "70",
+      "canonical": "19:00@100;21:00@70",
+      "max": "100",
+      "note": "3 a.m. (after the last point) stays at the dim value"
+    },
+    {
+      "name": "noon-is-the-start-of-the-curve-day",
+      "curve": "19:00@100;21:00@70",
+      "time": "12:00",
+      "expected": "100",
+      "canonical": "19:00@100;21:00@70",
+      "max": "100",
+      "note": "sort key 0: before the first point"
+    },
+    {
+      "name": "11-59-is-the-end-of-the-curve-day",
+      "curve": "19:00@100;21:00@70",
+      "time": "11:59",
+      "expected": "70",
+      "canonical": "19:00@100;21:00@70",
+      "max": "100",
+      "note": "sort key 1439: after the last point"
+    },
+    {
+      "name": "exactly-on-first-point",
+      "curve": "19:00@100;21:00@70;23:00@10",
+      "time": "19:00",
+      "expected": "100",
+      "canonical": "19:00@100;21:00@70;23:00@10",
+      "max": "100",
+      "note": "k == k_0 -> v_0"
+    },
+    {
+      "name": "exactly-on-interior-point",
+      "curve": "19:00@100;21:00@70;23:00@10",
+      "time": "21:00",
+      "expected": "70",
+      "canonical": "19:00@100;21:00@70;23:00@10",
+      "max": "100",
+      "note": "k == k_1: start of the second segment, value of the point itself"
+    },
+    {
+      "name": "exactly-on-last-point",
+      "curve": "19:00@100;21:00@70;23:00@10",
+      "time": "23:00",
+      "expected": "10",
+      "canonical": "19:00@100;21:00@70;23:00@10",
+      "max": "100",
+      "note": "k == k_last -> v_last"
+    },
+    {
+      "name": "mid-segment-in-second-segment",
+      "curve": "19:00@100;21:00@70;23:00@10",
+      "time": "22:30",
+      "expected": "25",
+      "canonical": "19:00@100;21:00@70;23:00@10",
+      "max": "100",
+      "note": "v = 70 + (-60 * 90) / 120 = 25"
+    },
+    {
+      "name": "default-curve-mid-segment",
+      "curve": "19:00@100;21:00@70;22:30@30;23:30@12",
+      "time": "21:45",
+      "expected": "50",
+      "canonical": "19:00@100;21:00@70;22:30@30;23:30@12",
+      "max": "100",
+      "note": "DEFAULT_CURVE, midpoint of 21:00@70 -> 22:30@30"
+    },
+    {
+      "name": "default-curve-last-segment",
+      "curve": "19:00@100;21:00@70;22:30@30;23:30@12",
+      "time": "23:00",
+      "expected": "21",
+      "canonical": "19:00@100;21:00@70;22:30@30;23:30@12",
+      "max": "100",
+      "note": "v = 30 + (-18 * 30) / 60 = 21"
+    },
+    {
+      "name": "plateau-segment",
+      "curve": "19:00@50;21:00@50",
+      "time": "20:00",
+      "expected": "50",
+      "canonical": "19:00@50;21:00@50",
+      "max": "50"
+    },
+    {
+      "name": "crossing-midnight-mid-segment",
+      "curve": "23:00@40;01:00@10",
+      "time": "00:00",
+      "expected": "25",
+      "canonical": "23:00@40;01:00@10",
+      "max": "40",
+      "note": "sort keys 660, 720, 780: midnight is the middle of the segment"
+    },
+    {
+      "name": "crossing-midnight-before-first-point",
+      "curve": "23:00@40;01:00@10",
+      "time": "13:00",
+      "expected": "40",
+      "canonical": "23:00@40;01:00@10",
+      "max": "40",
+      "note": "early afternoon (k = 60) is before the first point"
+    },
+    {
+      "name": "crossing-midnight-after-last-point",
+      "curve": "23:00@40;01:00@10",
+      "time": "02:00",
+      "expected": "10",
+      "canonical": "23:00@40;01:00@10",
+      "max": "40"
+    },
+    {
+      "name": "midnight-exact-point",
+      "curve": "23:00@40;00:00@20;01:00@10",
+      "time": "00:00",
+      "expected": "20",
+      "canonical": "23:00@40;00:00@20;01:00@10",
+      "max": "40",
+      "note": "a point at 00:00 (k = 720) is hit exactly"
+    },
+    {
+      "name": "midnight-point-segment-before",
+      "curve": "23:00@40;00:00@20;01:00@10",
+      "time": "23:30",
+      "expected": "30",
+      "canonical": "23:00@40;00:00@20;01:00@10",
+      "max": "40"
+    },
+    {
+      "name": "midnight-point-segment-after",
+      "curve": "23:00@40;00:00@20;01:00@10",
+      "time": "00:30",
+      "expected": "15",
+      "canonical": "23:00@40;00:00@20;01:00@10",
+      "max": "40"
+    },
+    {
+      "name": "adjacent-minutes-across-midnight",
+      "curve": "23:59@40;00:00@10",
+      "time": "00:00",
+      "expected": "10",
+      "canonical": "23:59@40;00:00@10",
+      "max": "40",
+      "note": "keys 719 and 720 are consecutive; 00:00 is the last point"
+    },
+    {
+      "name": "full-day-curve-mid-segment",
+      "curve": "12:00@100;11:59@1",
+      "time": "00:00",
+      "expected": "50",
+      "canonical": "12:00@100;11:59@1",
+      "max": "100",
+      "note": "v = 100 + (-99 * 720) / 1439 = 50.47 -> 50"
+    },
+    {
+      "name": "full-day-curve-exactly-on-noon-point",
+      "curve": "12:00@100;11:59@1",
+      "time": "12:00",
+      "expected": "100",
+      "canonical": "12:00@100;11:59@1",
+      "max": "100"
+    },
+    {
+      "name": "full-day-curve-exactly-on-11-59-point",
+      "curve": "12:00@100;11:59@1",
+      "time": "11:59",
+      "expected": "1",
+      "canonical": "12:00@100;11:59@1",
+      "max": "100"
+    },
+    {
+      "name": "unsorted-day-boundary-points",
+      "curve": "11:59@60;12:00@50",
+      "time": "00:00",
+      "expected": "55",
+      "canonical": "12:00@50;11:59@60",
+      "max": "60",
+      "note": "12:00 sorts first, 11:59 last; v = 50 + (10 * 720) / 1439 = 55.003 -> 55"
+    },
+    {
+      "name": "unsorted-input-is-sorted",
+      "curve": "23:30@12;19:00@100;22:30@30;21:00@70",
+      "time": "21:45",
+      "expected": "50",
+      "canonical": "19:00@100;21:00@70;22:30@30;23:30@12",
+      "max": "100"
+    },
+    {
+      "name": "unsorted-morning-point-sorts-after-late-night",
+      "curve": "11:00@10;23:00@40",
+      "time": "05:00",
+      "expected": "25",
+      "canonical": "23:00@40;11:00@10",
+      "max": "40",
+      "note": "noon pivot: 11:00 (k = 1380) comes after 23:00 (k = 660); v = 40 + (-30 * 360) / 720"
+    },
+    {
+      "name": "twelve-point-curve-crossing-midnight",
+      "curve": "17:00@100;18:00@95;19:00@90;20:00@80;21:00@70;22:00@55;23:00@40;00:00@30;01:00@22;02:00@16;03:00@12;04:00@10",
+      "time": "00:30",
+      "expected": "26",
+      "canonical": "17:00@100;18:00@95;19:00@90;20:00@80;21:00@70;22:00@55;23:00@40;00:00@30;01:00@22;02:00@16;03:00@12;04:00@10",
+      "max": "100",
+      "note": "max_points default; v = 30 + (-8 * 30) / 60 = 26"
+    },
+    {
+      "name": "twelve-point-curve-last-segment",
+      "curve": "17:00@100;18:00@95;19:00@90;20:00@80;21:00@70;22:00@55;23:00@40;00:00@30;01:00@22;02:00@16;03:00@12;04:00@10",
+      "time": "03:30",
+      "expected": "11",
+      "canonical": "17:00@100;18:00@95;19:00@90;20:00@80;21:00@70;22:00@55;23:00@40;00:00@30;01:00@22;02:00@16;03:00@12;04:00@10",
+      "max": "100"
+    },
+    {
+      "name": "rounding-half-up-on-an-ascending-segment",
+      "curve": "20:00@10;22:00@13",
+      "time": "20:20",
+      "expected": "11",
+      "canonical": "20:00@10;22:00@13",
+      "max": "13",
+      "note": "v = 10 + (3 * 20) / 120 = 10.5 -> 11"
+    },
+    {
+      "name": "rounding-half-up-on-a-descending-segment",
+      "curve": "20:00@13;22:00@10",
+      "time": "21:40",
+      "expected": "11",
+      "canonical": "20:00@13;22:00@10",
+      "max": "13",
+      "note": "v = 13 + (-3 * 100) / 120 = 10.5 -> 11"
+    },
+    {
+      "name": "rounding-below-half-rounds-down",
+      "curve": "19:00@100;21:00@70",
+      "time": "20:59",
+      "expected": "70",
+      "canonical": "19:00@100;21:00@70",
+      "max": "100",
+      "note": "v = 100 + (-30 * 119) / 120 = 70.25 -> 70"
+    },
+    {
+      "name": "rounding-above-half-rounds-up",
+      "curve": "19:00@100;21:00@70",
+      "time": "19:01",
+      "expected": "100",
+      "canonical": "19:00@100;21:00@70",
+      "max": "100",
+      "note": "v = 100 + (-30 * 1) / 120 = 99.75 -> 100"
+    },
+    {
+      "name": "operation-order-slope-first-would-round-down",
+      "curve": "20:00@30;20:14@1",
+      "time": "20:07",
+      "expected": "16",
+      "canonical": "20:00@30;20:14@1",
+      "max": "30",
+      "note": "v = 30 + (-29 * 7) / 14 = 15.5 -> 16; computing (b-a)/(kb-ka) first gives 15.4999 -> 15"
+    },
+    {
+      "name": "operation-order-ratio-first-would-round-down",
+      "curve": "20:00@100;20:20@10",
+      "time": "20:11",
+      "expected": "51",
+      "canonical": "20:00@100;20:20@10",
+      "max": "100",
+      "note": "v = 100 + (-90 * 11) / 20 = 50.5 -> 51; computing (k-ka)/(kb-ka) first gives 50.4999 -> 50"
+    },
+    {
+      "name": "operation-order-slope-first-across-midnight",
+      "curve": "23:00@70;00:30@1",
+      "time": "00:15",
+      "expected": "13",
+      "canonical": "23:00@70;00:30@1",
+      "max": "70",
+      "note": "v = 70 + (-69 * 75) / 90 = 12.5 exactly -> 13; slope-first 70 + (-69 / 90) * 75 = 12.499999999999993 -> 12. Segment crosses midnight (keys 660 -> 750, k = 735): second guard so removing one operation-order case does not hide a regression"
+    },
+    {
+      "name": "operation-order-ratio-first-across-midnight",
+      "curve": "23:00@100;01:00@10",
+      "time": "00:02",
+      "expected": "54",
+      "canonical": "23:00@100;01:00@10",
+      "max": "100",
+      "note": "v = 100 + (-90 * 62) / 120 = 53.5 exactly -> 54; ratio-first 100 + -90 * (62 / 120) = 53.49999999999999 -> 53. Segment crosses midnight (keys 660 -> 780, k = 722): second guard so removing one operation-order case does not hide a regression"
+    },
+    {
+      "name": "clamp-pct-below-1-and-above-100",
+      "curve": "19:00@0;21:00@150",
+      "time": "20:00",
+      "expected": "51",
+      "canonical": "19:00@1;21:00@100",
+      "max": "100",
+      "note": "0 -> 1, 150 -> 100; v = 1 + (99 * 60) / 120 = 50.5 -> 51"
+    },
+    {
+      "name": "clamp-three-digit-pct",
+      "curve": "19:00@000;21:00@999",
+      "time": "19:00",
+      "expected": "1",
+      "canonical": "19:00@1;21:00@100",
+      "max": "100",
+      "note": "000 -> 1, 999 -> 100 (3 digits are still a valid token)"
+    },
+    {
+      "name": "zero-padded-pct-serializes-unpadded",
+      "curve": "19:00@007;21:00@070",
+      "time": "20:00",
+      "expected": "39",
+      "canonical": "19:00@7;21:00@70",
+      "max": "70",
+      "note": "v = 7 + (63 * 60) / 120 = 38.5 -> 39; leading zeros are VALID ('070' is 70 in base 10): the Jinja digit check must not reject them"
+    },
+    {
+      "name": "one-digit-hour-serializes-zero-padded",
+      "curve": "9:30@5;19:00@100",
+      "time": "20:00",
+      "expected": "93",
+      "canonical": "19:00@100;09:30@5",
+      "max": "100",
+      "note": "keys 420 (19:00) and 1290 (09:30); v = 100 + (-95 * 60) / 870 = 93.45 -> 93"
+    },
+    {
+      "name": "duplicate-time-last-wins",
+      "curve": "19:00@100;21:00@70;19:00@50",
+      "time": "20:00",
+      "expected": "60",
+      "canonical": "19:00@50;21:00@70",
+      "max": "70"
+    },
+    {
+      "name": "duplicate-time-one-digit-hour-equals-two-digit",
+      "curve": "9:05@10;12:00@30;09:05@20",
+      "time": "09:05",
+      "expected": "20",
+      "canonical": "12:00@30;09:05@20",
+      "max": "30",
+      "note": "9:05 and 09:05 are the same minute; the later token wins"
+    },
+    {
+      "name": "invalid-duplicate-does-not-override",
+      "curve": "19:00@100;21:00@70;19:00@abc",
+      "time": "20:00",
+      "expected": "85",
+      "canonical": "19:00@100;21:00@70",
+      "max": "100",
+      "note": "only VALID occurrences take part in last-wins"
+    },
+    {
+      "name": "duplicates-collapse-below-minimum",
+      "curve": "19:00@100;19:00@50",
+      "time": "20:00",
+      "expected": null,
+      "canonical": null,
+      "max": null,
+      "note": "two tokens, one distinct time -> 1 point -> invalid"
+    },
+    {
+      "name": "whitespace-around-tokens",
+      "curve": "  19:00@100 ;\t21:00@70\t; ",
+      "time": "20:00",
+      "expected": "85",
+      "canonical": "19:00@100;21:00@70",
+      "max": "100",
+      "note": "ASCII spaces and tabs are trimmed; the trailing blank token is ignored"
+    },
+    {
+      "name": "empty-tokens-and-trailing-separator",
+      "curve": ";19:00@100;;21:00@70;",
+      "time": "20:00",
+      "expected": "85",
+      "canonical": "19:00@100;21:00@70",
+      "max": "100"
+    },
+    {
+      "name": "spec-section-3-example",
+      "curve": " 9:05@0 ; 23:00@40;09:05@150",
+      "time": "00:00",
+      "expected": "46",
+      "canonical": "23:00@40;09:05@100",
+      "max": "100",
+      "note": "trim + 1-digit hour + last-wins + clamp + sort; v = 40 + (60 * 60) / 605 = 45.95 -> 46"
+    },
+    {
+      "name": "invalid-tokens-garbage-ignored",
+      "curve": "19:00@100;bogus;hello world;21:00@70",
+      "time": "20:00",
+      "expected": "85",
+      "canonical": "19:00@100;21:00@70",
+      "max": "100"
+    },
+    {
+      "name": "invalid-time-out-of-range",
+      "curve": "19:00@100;24:00@50;19:60@50;21:00@70",
+      "time": "20:00",
+      "expected": "85",
+      "canonical": "19:00@100;21:00@70",
+      "max": "100",
+      "note": "24:00 and 19:60 match the shape but fail the HH/MM range check"
+    },
+    {
+      "name": "invalid-time-digit-width",
+      "curve": "19:00@100;19:5@50;019:00@50;1900@50;21:00@70",
+      "time": "20:00",
+      "expected": "85",
+      "canonical": "19:00@100;21:00@70",
+      "max": "100",
+      "note": "minutes must be exactly 2 digits, hour 1 or 2, colon mandatory"
+    },
+    {
+      "name": "invalid-value-format-ignored",
+      "curve": "19:00@100;20:30@+5;22:00@50%;22:30@;@50;23:00@abc;21:00@70",
+      "time": "20:00",
+      "expected": "85",
+      "canonical": "19:00@100;21:00@70",
+      "max": "100",
+      "note": "plus sign, %, missing value, missing time and letters are invalid (a leading '-' and a decimal part are valid since v2: see the v2-* cases)"
+    },
+    {
+      "name": "five-digit-value-is-invalid-not-clamped",
+      "curve": "19:00@50;21:00@10000;23:00@10",
+      "time": "21:00",
+      "expected": "30",
+      "canonical": "19:00@50;23:00@10",
+      "max": "50",
+      "note": "10000 has 5 digits (v2 allows 1-4): the token is dropped, NOT clamped to 100; v = 50 + (-40 * 120) / 240"
+    },
+    {
+      "name": "invalid-internal-spaces",
+      "curve": "19:00@100;20:00 @50;20:30@ 50;21 :00@50;21:00@70",
+      "time": "20:00",
+      "expected": "85",
+      "canonical": "19:00@100;21:00@70",
+      "max": "100"
+    },
+    {
+      "name": "non-ascii-digits-are-invalid",
+      "curve": "19:00@100;21:00@70;２３:００@１０",
+      "time": "22:00",
+      "expected": "70",
+      "canonical": "19:00@100;21:00@70",
+      "max": "100",
+      "note": "only ASCII 0-9 digits; full-width digits make the token invalid (Python \\d and int() would accept them)"
+    },
+    {
+      "name": "trailing-newline-token-is-invalid",
+      "curve": "19:00@100;21:00@70;23:00@10\n",
+      "time": "22:00",
+      "expected": "70",
+      "canonical": "19:00@100;21:00@70",
+      "max": "100",
+      "note": "only ASCII space/tab are trimmed: a token ending in \\n is invalid (Python strip() without arguments and a regex ending in $ would accept it; use strip(' \\t'))"
+    },
+    {
+      "name": "pct-with-leading-space-is-invalid",
+      "curve": "19:00@100;21:00@70;22:00@ 10",
+      "time": "21:30",
+      "expected": "70",
+      "canonical": "19:00@100;21:00@70",
+      "max": "100",
+      "note": "HA's int filter accepts ' 10' (3 chars, passes the length check): every digit must be checked against '0123456789' before | int"
+    },
+    {
+      "name": "pct-with-plus-sign-is-invalid",
+      "curve": "19:00@100;21:00@70;22:00@+10",
+      "time": "21:30",
+      "expected": "70",
+      "canonical": "19:00@100;21:00@70",
+      "max": "100",
+      "note": "HA's int filter accepts '+10': check the digits before | int"
+    },
+    {
+      "name": "malformed-decimal-point-is-invalid",
+      "curve": "19:00@100;21:00@70;22:00@1.;23:00@.5;23:30@1.005",
+      "time": "21:30",
+      "expected": "70",
+      "canonical": "19:00@100;21:00@70",
+      "max": "100",
+      "note": "a decimal part needs digits on both sides of '.', and at most 2 after it; HA's int / float filters would accept all three: validate the text before converting"
+    },
+    {
+      "name": "pct-in-exponent-notation-is-invalid",
+      "curve": "19:00@100;21:00@70;22:00@1e2",
+      "time": "21:30",
+      "expected": "70",
+      "canonical": "19:00@100;21:00@70",
+      "max": "100",
+      "note": "'1e2' | int is 100 in HA (float fallback): check the digits before | int"
+    },
+    {
+      "name": "pct-in-hex-notation-is-invalid",
+      "curve": "19:00@100;21:00@70;22:00@0x1",
+      "time": "21:30",
+      "expected": "70",
+      "canonical": "19:00@100;21:00@70",
+      "max": "100",
+      "note": "'0x1' | int(0) is the default 0, clamped to 1 if the token were kept: reject non-digits before converting"
+    },
+    {
+      "name": "full-width-digits-do-not-override-a-point",
+      "curve": "19:00@100;21:00@70;１９:００@５０",
+      "time": "20:00",
+      "expected": "85",
+      "canonical": "19:00@100;21:00@70",
+      "max": "100",
+      "note": "full-width '１９:００@５０' is not 19:00@50: the token is invalid and must not win the duplicate-time rule (HA's int filter converts full-width digits)"
+    },
+    {
+      "name": "arabic-indic-digits-are-invalid",
+      "curve": "19:00@100;21:00@70;٢٢:٠٠@١٠",
+      "time": "21:30",
+      "expected": "70",
+      "canonical": "19:00@100;21:00@70",
+      "max": "100",
+      "note": "Arabic-Indic digits: Python isdigit() / int() accept them, the TS grammar does not"
+    },
+    {
+      "name": "one-digit-minute-is-invalid-even-with-one-digit-hour",
+      "curve": "19:00@100;21:00@70;9:5@50",
+      "time": "03:00",
+      "expected": "70",
+      "canonical": "19:00@100;21:00@70",
+      "max": "100",
+      "note": "minutes need exactly 2 digits: '9:5' is not 09:05"
+    },
+    {
+      "name": "time-with-seconds-is-invalid",
+      "curve": "19:00@100;21:00@70;22:00:00@10",
+      "time": "21:30",
+      "expected": "70",
+      "canonical": "19:00@100;21:00@70",
+      "max": "100",
+      "note": "'22:00:00' has two ':': the split must give exactly 2 parts (taking parts [0] and [1] would read 22:00)"
+    },
+    {
+      "name": "two-at-signs-is-invalid",
+      "curve": "19:00@100;21:00@70;22:00@10@5",
+      "time": "21:30",
+      "expected": "70",
+      "canonical": "19:00@100;21:00@70",
+      "max": "100",
+      "note": "'22:00@10@5' has two '@': the split must give exactly 2 parts (taking parts [0] and [1] would read 22:00@10)"
+    },
+    {
+      "name": "crlf-separators-are-not-trimmed",
+      "curve": "19:00@100;21:00@70\r\n;\r\n22:00@10;23:00@5",
+      "time": "21:30",
+      "expected": "41",
+      "canonical": "19:00@100;23:00@5",
+      "max": "100",
+      "note": "CR/LF around a token are not trimmed (only ASCII space/tab): '21:00@70\\r\\n' and '\\r\\n22:00@10' are invalid"
+    },
+    {
+      "name": "no-break-space-is-not-trimmed",
+      "curve": "19:00@100;21:00@70;22:00@10 ",
+      "time": "21:30",
+      "expected": "70",
+      "canonical": "19:00@100;21:00@70",
+      "max": "100",
+      "note": "a trailing no-break space (U+00A0) makes the token invalid: Python strip() without arguments would remove it, strip(' \\t') does not"
+    },
+    {
+      "name": "repeated-separators-between-tokens",
+      "curve": "19:00@100;;;21:00@70",
+      "time": "20:00",
+      "expected": "85",
+      "canonical": "19:00@100;21:00@70",
+      "max": "100",
+      "note": "consecutive ';' produce empty tokens that are skipped"
+    },
+    {
+      "name": "hour-24-is-invalid",
+      "curve": "19:00@100;24:00@10",
+      "time": "20:00",
+      "expected": null,
+      "canonical": null,
+      "max": null,
+      "note": "24:00 would get the same sort key as 00:00 (720): only the hour range check (0-23) rejects it"
+    },
+    {
+      "name": "single-point-is-invalid",
+      "curve": "19:00@100",
+      "time": "20:00",
+      "expected": null,
+      "canonical": null,
+      "max": null
+    },
+    {
+      "name": "only-invalid-tokens-is-invalid",
+      "curve": "bogus;24:00@50;19:00@;@50",
+      "time": "20:00",
+      "expected": null,
+      "canonical": null,
+      "max": null
+    },
+    {
+      "name": "one-valid-token-among-invalid-is-invalid",
+      "curve": "19:00@100;bogus;19:60@70",
+      "time": "20:00",
+      "expected": null,
+      "canonical": null,
+      "max": null
+    },
+    {
+      "name": "empty-string-is-invalid",
+      "curve": "",
+      "time": "20:00",
+      "expected": null,
+      "canonical": null,
+      "max": null
+    },
+    {
+      "name": "separators-and-spaces-only-is-invalid",
+      "curve": " ; ;\t",
+      "time": "20:00",
+      "expected": null,
+      "canonical": null,
+      "max": null
+    },
+    {
+      "name": "unknown-state-is-invalid",
+      "curve": "unknown",
+      "time": "20:00",
+      "expected": null,
+      "canonical": null,
+      "max": null,
+      "note": "HA placeholder state"
+    },
+    {
+      "name": "unavailable-state-is-invalid",
+      "curve": "unavailable",
+      "time": "20:00",
+      "expected": null,
+      "canonical": null,
+      "max": null,
+      "note": "HA placeholder state"
+    },
+    {
+      "name": "v2-four-digit-value-is-clamped",
+      "curve": "19:00@50;21:00@1000;23:00@10",
+      "time": "21:00",
+      "expected": "100",
+      "canonical": "19:00@50;21:00@100;23:00@10",
+      "max": "100",
+      "note": "1000 is a valid 4-digit value since v2, clamped to the range max"
+    },
+    {
+      "name": "v2-decimal-values-are-valid-in-brightness",
+      "curve": "19:00@100;21:00@70;22:00@1.0;23:00@10.0",
+      "time": "21:30",
+      "expected": "36",
+      "canonical": "19:00@100;21:00@70;22:00@1;23:00@10",
+      "max": "100",
+      "note": "N = 7000 * 60 + (100 - 7000) * 30 = 213000, D = 60 -> 3550 centi = 35.5 -> half up to the step 1 -> 36"
+    },
+    {
+      "name": "v2-off-grid-point-returned-as-stored",
+      "curve": "19:00@70.5;21:00@50",
+      "time": "19:00",
+      "expected": "70.5",
+      "canonical": "19:00@70.5;21:00@50",
+      "max": "70.5",
+      "note": "a point value is returned as stored, never quantized to the step"
+    },
+    {
+      "name": "v2-interpolation-from-off-grid-point-is-quantized",
+      "curve": "19:00@70.5;21:00@50",
+      "time": "20:00",
+      "expected": "60",
+      "canonical": "19:00@70.5;21:00@50",
+      "max": "70.5",
+      "note": "N / D = 6025 centi (60.25) -> step 100 -> 60"
+    },
+    {
+      "name": "v2-interior-off-grid-point-returned-as-stored",
+      "curve": "19:00@100;20:00@55.55;21:00@10",
+      "time": "20:00",
+      "expected": "55.55",
+      "canonical": "19:00@100;20:00@55.55;21:00@10",
+      "max": "100",
+      "note": "k == ka on an interior point: the stored value, not floorDiv(2N + Ds, 2Ds) * s (which would give 56)"
+    },
+    {
+      "name": "v2-negative-value-clamped-to-brightness-min",
+      "curve": "19:00@-5;21:00@100",
+      "time": "20:00",
+      "expected": "51",
+      "canonical": "19:00@1;21:00@100",
+      "max": "100",
+      "note": "-5 is a valid v2 value, clamped to 1; N / D = 5050 centi -> 51"
+    },
+    {
+      "name": "v2-off-grid-plateau-is-quantized-between-points",
+      "curve": "20:00@10.49;21:00@10.49",
+      "time": "20:30",
+      "expected": "10",
+      "canonical": "20:00@10.49;21:00@10.49",
+      "max": "10.49",
+      "note": "between the points the value is quantized (10.49 -> 10); on them it is 10.49"
+    },
+    {
+      "name": "v2-leading-and-trailing-zeros-are-canonicalized",
+      "curve": "19:00@070.50;21:00@0050.0",
+      "time": "21:00",
+      "expected": "50",
+      "canonical": "19:00@70.5;21:00@50",
+      "max": "70.5"
+    },
+    {
+      "name": "invalid-decimal-forms-are-ignored",
+      "curve": "19:00@100;21:00@70;22:00@19.;22:10@.5;22:20@19.555;22:30@19,5;22:40@1e3;22:50@-;23:00@--5;23:10@1.2.3;23:20@-.5;23:30@12345",
+      "time": "22:00",
+      "expected": "70",
+      "canonical": "19:00@100;21:00@70",
+      "max": "100",
+      "note": "'19.', '.5', 3 decimals, comma, exponent, bare or double '-', two dots, '-.5' and 5 digits are all invalid"
+    },
+    {
+      "name": "heating-default-mid-segment-rounds-half-up-to-step",
+      "range": [500, 3000],
+      "step": 50,
+      "curve": "17:00@20;22:00@18.5;06:00@17;07:00@20",
+      "time": "19:30",
+      "expected": "19.5",
+      "canonical": "17:00@20;22:00@18.5;06:00@17;07:00@20",
+      "max": "20",
+      "note": "N = 2000 * 300 + (-150) * 150 = 577500, D = 300 -> 1925 centi (19.25), a tie on the 0.5 grid -> up -> 19.5"
+    },
+    {
+      "name": "heating-default-exactly-on-point",
+      "range": [500, 3000],
+      "step": 50,
+      "curve": "17:00@20;22:00@18.5;06:00@17;07:00@20",
+      "time": "22:00",
+      "expected": "18.5",
+      "canonical": "17:00@20;22:00@18.5;06:00@17;07:00@20",
+      "max": "20"
+    },
+    {
+      "name": "heating-default-across-midnight",
+      "range": [500, 3000],
+      "step": 50,
+      "curve": "17:00@20;22:00@18.5;06:00@17;07:00@20",
+      "time": "02:00",
+      "expected": "18",
+      "canonical": "17:00@20;22:00@18.5;06:00@17;07:00@20",
+      "max": "20",
+      "note": "keys 600 -> 1080, k = 840: 1775 centi (17.75) -> 18"
+    },
+    {
+      "name": "heating-default-last-segment",
+      "range": [500, 3000],
+      "step": 50,
+      "curve": "17:00@20;22:00@18.5;06:00@17;07:00@20",
+      "time": "06:30",
+      "expected": "18.5",
+      "canonical": "17:00@20;22:00@18.5;06:00@17;07:00@20",
+      "max": "20",
+      "note": "1850 centi, already on the grid"
+    },
+    {
+      "name": "heating-default-after-last-point",
+      "range": [500, 3000],
+      "step": 50,
+      "curve": "17:00@20;22:00@18.5;06:00@17;07:00@20",
+      "time": "11:00",
+      "expected": "20",
+      "canonical": "17:00@20;22:00@18.5;06:00@17;07:00@20",
+      "max": "20"
+    },
+    {
+      "name": "heating-default-before-first-point",
+      "range": [500, 3000],
+      "step": 50,
+      "curve": "17:00@20;22:00@18.5;06:00@17;07:00@20",
+      "time": "13:00",
+      "expected": "20",
+      "canonical": "17:00@20;22:00@18.5;06:00@17;07:00@20",
+      "max": "20"
+    },
+    {
+      "name": "heating-tie-rounds-up-ascending",
+      "range": [500, 3000],
+      "step": 50,
+      "curve": "20:00@18;21:00@18.5",
+      "time": "20:30",
+      "expected": "18.5",
+      "canonical": "20:00@18;21:00@18.5",
+      "max": "18.5",
+      "note": "18.25 -> 18.5"
+    },
+    {
+      "name": "heating-tie-rounds-up-descending",
+      "range": [500, 3000],
+      "step": 50,
+      "curve": "20:00@18.5;21:00@18",
+      "time": "20:30",
+      "expected": "18.5",
+      "canonical": "20:00@18.5;21:00@18",
+      "max": "18.5",
+      "note": "18.25 -> 18.5: half UP (towards +infinity), not half away from the segment start"
+    },
+    {
+      "name": "heating-below-tie-rounds-down",
+      "range": [500, 3000],
+      "step": 50,
+      "curve": "20:00@18;21:00@18.5",
+      "time": "20:29",
+      "expected": "18",
+      "canonical": "20:00@18;21:00@18.5",
+      "max": "18.5",
+      "note": "1824.17 centi -> 18"
+    },
+    {
+      "name": "heating-parsed-values-are-clamped",
+      "range": [500, 3000],
+      "step": 50,
+      "curve": "17:00@35;22:00@2",
+      "time": "19:30",
+      "expected": "17.5",
+      "canonical": "17:00@30;22:00@5",
+      "max": "30",
+      "note": "35 -> 30, 2 -> 5; 1750 centi on the grid"
+    },
+    {
+      "name": "heating-off-grid-point-returned-as-stored",
+      "range": [500, 3000],
+      "step": 50,
+      "curve": "17:00@19.25;22:00@18",
+      "time": "17:00",
+      "expected": "19.25",
+      "canonical": "17:00@19.25;22:00@18",
+      "max": "19.25"
+    },
+    {
+      "name": "heating-off-grid-segment-is-quantized",
+      "range": [500, 3000],
+      "step": 50,
+      "curve": "17:00@19.25;22:00@18",
+      "time": "18:00",
+      "expected": "19",
+      "canonical": "17:00@19.25;22:00@18",
+      "max": "19.25",
+      "note": "N / D = 1900 centi exactly; floorDiv(2N + Ds, 2Ds) = 38 -> 19"
+    },
+    {
+      "name": "heating-four-digit-and-small-values-are-clamped",
+      "range": [500, 3000],
+      "step": 50,
+      "curve": "17:00@1000;22:00@0.5",
+      "time": "21:00",
+      "expected": "10",
+      "canonical": "17:00@30;22:00@5",
+      "max": "30"
+    },
+    {
+      "name": "heating-invalid-decimal-forms-are-ignored",
+      "range": [500, 3000],
+      "step": 50,
+      "curve": "17:00@20;22:00@18;19:00@19.;20:00@.5;21:00@19.555;21:30@19,5;18:00@+19;18:30@1e3",
+      "time": "19:00",
+      "expected": "19",
+      "canonical": "17:00@20;22:00@18",
+      "max": "20",
+      "note": "1920 centi -> 19"
+    },
+    {
+      "name": "heating-trailing-zeros-are-canonicalized",
+      "range": [500, 3000],
+      "step": 50,
+      "curve": "17:00@20.50;22:00@18.0",
+      "time": "19:30",
+      "expected": "19.5",
+      "canonical": "17:00@20.5;22:00@18",
+      "max": "20.5"
+    },
+    {
+      "name": "heating-negative-value-clamped-to-min",
+      "range": [500, 3000],
+      "step": 50,
+      "curve": "17:00@-3.5;22:00@21",
+      "time": "18:00",
+      "expected": "8",
+      "canonical": "17:00@5;22:00@21",
+      "max": "21",
+      "note": "820 centi -> 8"
+    },
+    {
+      "name": "heating-v1-integer-string",
+      "range": [500, 3000],
+      "step": 50,
+      "curve": "17:00@21;23:00@17",
+      "time": "20:00",
+      "expected": "19",
+      "canonical": "17:00@21;23:00@17",
+      "max": "21"
+    },
+    {
+      "name": "heating-across-midnight-quantized",
+      "range": [500, 3000],
+      "step": 50,
+      "curve": "22:00@19;02:00@16.5",
+      "time": "23:07",
+      "expected": "18.5",
+      "canonical": "22:00@19;02:00@16.5",
+      "max": "19",
+      "note": "1830.2 centi -> 18.5"
+    },
+    {
+      "name": "heating-single-point-is-invalid",
+      "range": [500, 3000],
+      "step": 50,
+      "curve": "17:00@20;17:00@21",
+      "time": "18:00",
+      "expected": null,
+      "canonical": null,
+      "max": null,
+      "note": "one distinct time"
+    },
+    {
+      "name": "color-temp-default-mid-segment",
+      "range": [200000, 650000],
+      "step": 5000,
+      "curve": "17:00@4000;21:00@2700;23:00@2200",
+      "time": "19:00",
+      "expected": "3350",
+      "canonical": "17:00@4000;21:00@2700;23:00@2200",
+      "max": "4000",
+      "note": "335000 centi, on the 50 K grid"
+    },
+    {
+      "name": "color-temp-default-second-segment",
+      "range": [200000, 650000],
+      "step": 5000,
+      "curve": "17:00@4000;21:00@2700;23:00@2200",
+      "time": "22:00",
+      "expected": "2450",
+      "canonical": "17:00@4000;21:00@2700;23:00@2200",
+      "max": "4000"
+    },
+    {
+      "name": "color-temp-default-quantized",
+      "range": [200000, 650000],
+      "step": 5000,
+      "curve": "17:00@4000;21:00@2700;23:00@2200",
+      "time": "21:10",
+      "expected": "2650",
+      "canonical": "17:00@4000;21:00@2700;23:00@2200",
+      "max": "4000",
+      "note": "2658.33 K -> 2650"
+    },
+    {
+      "name": "color-temp-default-before-first-point",
+      "range": [200000, 650000],
+      "step": 5000,
+      "curve": "17:00@4000;21:00@2700;23:00@2200",
+      "time": "16:00",
+      "expected": "4000",
+      "canonical": "17:00@4000;21:00@2700;23:00@2200",
+      "max": "4000"
+    },
+    {
+      "name": "color-temp-default-after-last-point",
+      "range": [200000, 650000],
+      "step": 5000,
+      "curve": "17:00@4000;21:00@2700;23:00@2200",
+      "time": "03:00",
+      "expected": "2200",
+      "canonical": "17:00@4000;21:00@2700;23:00@2200",
+      "max": "4000"
+    },
+    {
+      "name": "color-temp-tie-rounds-up",
+      "range": [200000, 650000],
+      "step": 5000,
+      "curve": "20:00@3000;21:00@3050",
+      "time": "20:30",
+      "expected": "3050",
+      "canonical": "20:00@3000;21:00@3050",
+      "max": "3050",
+      "note": "3025 K -> 3050"
+    },
+    {
+      "name": "color-temp-values-are-clamped",
+      "range": [200000, 650000],
+      "step": 5000,
+      "curve": "17:00@9999;21:00@1500",
+      "time": "17:00",
+      "expected": "6500",
+      "canonical": "17:00@6500;21:00@2000",
+      "max": "6500"
+    },
+    {
+      "name": "color-temp-off-grid-decimal-point-as-stored",
+      "range": [200000, 650000],
+      "step": 5000,
+      "curve": "17:00@2700.5;21:00@2200",
+      "time": "17:00",
+      "expected": "2700.5",
+      "canonical": "17:00@2700.5;21:00@2200",
+      "max": "2700.5"
+    },
+    {
+      "name": "color-temp-five-digits-are-invalid",
+      "range": [200000, 650000],
+      "step": 5000,
+      "curve": "17:00@4000;21:00@2700;22:00@10000",
+      "time": "22:00",
+      "expected": "2700",
+      "canonical": "17:00@4000;21:00@2700",
+      "max": "4000"
+    },
+    {
+      "name": "color-temp-just-after-a-point",
+      "range": [200000, 650000],
+      "step": 5000,
+      "curve": "17:00@4000;21:00@2700",
+      "time": "17:01",
+      "expected": "4000",
+      "canonical": "17:00@4000;21:00@2700",
+      "max": "4000",
+      "note": "3994.58 K -> 4000"
+    },
+    {
+      "name": "color-temp-across-midnight",
+      "range": [200000, 650000],
+      "step": 5000,
+      "curve": "22:00@3000;01:00@2000",
+      "time": "00:00",
+      "expected": "2350",
+      "canonical": "22:00@3000;01:00@2000",
+      "max": "3000",
+      "note": "2333.33 K -> 2350"
+    },
+    {
+      "name": "color-temp-only-invalid-tokens-is-invalid",
+      "range": [200000, 650000],
+      "step": 5000,
+      "curve": "17:00@4000;21:00@27000;23:00@2,200;24:00@3000",
+      "time": "19:00",
+      "expected": null,
+      "canonical": null,
+      "max": null,
+      "note": "5 digits, a comma and hour 24 are invalid: one valid point remains"
+    },
+    {
+      "name": "color-temp-range-from-1500",
+      "range": [150000, 650000],
+      "step": 5000,
+      "curve": "17:00@1000;21:00@2700",
+      "time": "17:00",
+      "expected": "1500",
+      "canonical": "17:00@1500;21:00@2700",
+      "max": "2700",
+      "note": "another range: 1000 is clamped to 1500"
+    },
+    {
+      "name": "custom-negative-value-as-stored",
+      "range": [-2000, 4000],
+      "step": 50,
+      "curve": "17:00@-2.05;21:00@3",
+      "time": "17:00",
+      "expected": "-2.05",
+      "canonical": "17:00@-2.05;21:00@3",
+      "max": "3"
+    },
+    {
+      "name": "custom-negative-to-positive-segment",
+      "range": [-2000, 4000],
+      "step": 50,
+      "curve": "17:00@-2.05;21:00@3",
+      "time": "19:00",
+      "expected": "0.5",
+      "canonical": "17:00@-2.05;21:00@3",
+      "max": "3",
+      "note": "N / D = 47.5 centi -> 50"
+    },
+    {
+      "name": "custom-negative-tie-rounds-up-to-zero",
+      "range": [-2000, 4000],
+      "step": 50,
+      "curve": "17:00@-0.5;18:00@0",
+      "time": "17:30",
+      "expected": "0",
+      "canonical": "17:00@-0.5;18:00@0",
+      "max": "0",
+      "note": "-0.25 on the 0.5 grid: floorDiv(-3000 + 3000, 6000) = 0 -> formatted 0 (never -0)"
+    },
+    {
+      "name": "custom-negative-on-grid",
+      "range": [-2000, 4000],
+      "step": 50,
+      "curve": "17:00@-1;18:00@-2",
+      "time": "17:30",
+      "expected": "-1.5",
+      "canonical": "17:00@-1;18:00@-2",
+      "max": "-1"
+    },
+    {
+      "name": "custom-negative-tie-rounds-towards-plus-infinity",
+      "range": [-2000, 4000],
+      "step": 50,
+      "curve": "17:00@-1;18:00@-2",
+      "time": "17:15",
+      "expected": "-1",
+      "canonical": "17:00@-1;18:00@-2",
+      "max": "-1",
+      "note": "-1.25 -> -1 (half up), not -1.5 (half away from zero)"
+    },
+    {
+      "name": "custom-values-clamped-to-custom-range",
+      "range": [-2000, 4000],
+      "step": 50,
+      "curve": "17:00@-50;18:00@99",
+      "time": "17:00",
+      "expected": "-20",
+      "canonical": "17:00@-20;18:00@40",
+      "max": "40"
+    },
+    {
+      "name": "custom-minus-zero-is-zero",
+      "range": [-2000, 4000],
+      "step": 50,
+      "curve": "17:00@-0;18:00@-0.00;19:00@-0.05",
+      "time": "18:30",
+      "expected": "0",
+      "canonical": "17:00@0;18:00@0;19:00@-0.05",
+      "max": "0",
+      "note": "-2.5 centi -> 0"
+    },
+    {
+      "name": "custom-small-negative-is-formatted-with-leading-zero",
+      "range": [-2000, 4000],
+      "step": 50,
+      "curve": "17:00@-0;18:00@-0.00;19:00@-0.05",
+      "time": "19:00",
+      "expected": "-0.05",
+      "canonical": "17:00@0;18:00@0;19:00@-0.05",
+      "max": "0"
+    },
+    {
+      "name": "custom-step-one-tenth",
+      "range": [-2000, 4000],
+      "step": 10,
+      "curve": "17:00@0;20:00@1",
+      "time": "18:00",
+      "expected": "0.3",
+      "canonical": "17:00@0;20:00@1",
+      "max": "1",
+      "note": "33.3 centi -> 30"
+    },
+    {
+      "name": "custom-step-one-tenth-rounds-up",
+      "range": [-2000, 4000],
+      "step": 10,
+      "curve": "17:00@0;20:00@1",
+      "time": "19:30",
+      "expected": "0.8",
+      "canonical": "17:00@0;20:00@1",
+      "max": "1",
+      "note": "83.3 centi -> 80"
+    },
+    {
+      "name": "custom-quantized-below-min-is-clamped",
+      "range": [100, 10000],
+      "step": 500,
+      "curve": "17:00@1;18:00@3",
+      "time": "17:30",
+      "expected": "1",
+      "canonical": "17:00@1;18:00@3",
+      "max": "3",
+      "note": "step 5: 2 -> 0, then clamped to the min 1"
+    },
+    {
+      "name": "custom-extreme-values-cancel",
+      "range": [-999999, 999999],
+      "step": 1,
+      "curve": "17:00@-9999.99;18:00@9999.99",
+      "time": "17:30",
+      "expected": "0",
+      "canonical": "17:00@-9999.99;18:00@9999.99",
+      "max": "9999.99"
+    },
+    {
+      "name": "custom-extreme-values-exact",
+      "range": [-999999, 999999],
+      "step": 1,
+      "curve": "17:00@-9999.99;18:00@9999.99",
+      "time": "17:01",
+      "expected": "-9666.66",
+      "canonical": "17:00@-9999.99;18:00@9999.99",
+      "max": "9999.99",
+      "note": "N / D = -966665.7 centi -> -966666"
+    }
+  ]
+}

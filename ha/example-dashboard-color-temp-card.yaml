@@ -1,0 +1,35 @@
+# =====================================================================
+#  time-curve-card: example card configuration for a colour
+#  temperature curve (goes with ha/example-color-temp-package.yaml).
+#
+#  Dashboard -> pencil "Edit dashboard" -> "Add card" -> "Manual", then
+#  paste this block. The card's JavaScript module must be installed first
+#  (see the README). Every option is described in
+#  ha/example-dashboard-card.yaml.
+# =====================================================================
+type: custom:time-curve-card
+
+# Required: the input_text that stores the curve (format HH:MM@V;...).
+entity: input_text.color_temp_curve
+
+# Value range, step, unit and label of the "color_temp" preset:
+# 2000 to 6500 K, step 50 K. The same range and step are set at the top of
+# the sensor's parse block (vmin / vmax / vstep, in hundredths): keep them
+# equal, otherwise the card and the sensor compute different values.
+preset: color_temp
+
+# Optional: the sensor computed by Home Assistant.
+target_sensor: sensor.color_temp_curve_target
+
+# Optional: the light the curve drives (the card shows its state).
+# Replace it by your light, or remove the line.
+target_entity: light.your_light
+
+title: Colour temperature
+
+# Visible time range; times are QUOTED on purpose (YAML 1.1 reads an
+# unquoted 17:00 as the number 1020).
+window_start: "15:00"
+window_end: "01:00"
+snap_minutes: 5
+max_points: 12

@@ -1,0 +1,6 @@
+{
+  "name": "Time Curve Card",
+  "filename": "time-curve-card.js",
+  "hide_default_branch": true,
+  "homeassistant": "2024.11.0"
+}

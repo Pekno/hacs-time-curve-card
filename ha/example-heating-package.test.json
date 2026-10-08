@@ -1,0 +1,64 @@
+{
+  "$comment": "Test descriptor of example-heating-package.yaml, read by test/jinja/test_sensor.py (npm run test:jinja). The format is documented in the docstring of that file.",
+  "package": "example-heating-package.yaml",
+  "curve_entity": "input_text.heating_curve",
+  "sensor_unique_id": "heating_curve_target",
+  "range": [500, 3000],
+  "step": 50,
+  "unit": "°C",
+  "neutral_states": {
+    "input_boolean.heating_curve_enabled": "on"
+  },
+  "scenarios": [
+    {
+      "name": "curve-disabled-uses-the-comfort-value-for-any-curve",
+      "states": { "input_boolean.heating_curve_enabled": "off" },
+      "available": true,
+      "state": "20",
+      "mode": "override",
+      "reason": "Curve disabled"
+    },
+    {
+      "name": "curve-disabled-without-curve-value",
+      "time": "21:45",
+      "states": { "input_boolean.heating_curve_enabled": "off" },
+      "matrix": { "input_text.heating_curve": ["unavailable", "unknown", null, ""] },
+      "available": true,
+      "state": 20,
+      "mode": "override",
+      "reason": "Curve disabled"
+    },
+    {
+      "name": "boolean-without-value-follows-the-curve",
+      "time": "19:30",
+      "states": { "input_text.heating_curve": "17:00@20;22:00@18.5;06:00@17;07:00@20" },
+      "matrix": { "input_boolean.heating_curve_enabled": ["unavailable", "unknown", null] },
+      "available": true,
+      "state": "19.5",
+      "mode": "curve",
+      "reason": null
+    },
+    {
+      "name": "curve-without-value-is-unavailable",
+      "time": "21:45",
+      "states": { "input_boolean.heating_curve_enabled": "on" },
+      "matrix": { "input_text.heating_curve": ["unavailable", "unknown", null, ""] },
+      "available": false,
+      "state": null,
+      "mode": null,
+      "reason": null
+    }
+  ],
+  "checks": {
+    "curve_helper": {
+      "name": "Heating curve",
+      "min": 0,
+      "mode": "text",
+      "icon": "mdi:thermometer-auto"
+    },
+    "sensor": {
+      "name": "Heating curve target",
+      "icon": "mdi:thermometer-auto"
+    }
+  }
+}

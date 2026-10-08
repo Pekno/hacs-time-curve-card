@@ -1,0 +1,73 @@
+# =====================================================================
+#  time-curve-card: example card configuration, every option
+#  (brightness curve; goes with ha/example-package.yaml).
+#
+#  Dashboard -> pencil "Edit dashboard" -> "Add card" -> "Manual", then
+#  paste this block. The card's JavaScript module must be installed first:
+#  by HACS, or as the resource /local/time-curve-card.js?v=<version>
+#  of type "JavaScript module" (see the README).
+#  Other examples: ha/example-dashboard-heating-card.yaml and
+#  ha/example-dashboard-color-temp-card.yaml.
+# =====================================================================
+type: custom:time-curve-card
+
+# Required: the input_text that stores the curve. The card reads and writes
+# it (format HH:MM@V;HH:MM@V;..., e.g. 19:00@100;21:00@70).
+entity: input_text.brightness_curve
+
+# Optional: the kind of value, which fills in min, max, step, unit, label
+# and the reset curve: brightness (the default: 1-100 %, step 1),
+# temperature (5-30 °C, step 0.5), color_temp (2000-6500 K, step 50) or
+# custom (min, max and step are then required). The range and step must be
+# the same as the vmin / vmax / vstep constants at the top of the sensor's
+# parse block (in hundredths), otherwise the card and the sensor compute
+# different values.
+preset: brightness
+
+# Optional: each key below overrides the preset's value.
+# min: 1              # lowest value (at most 2 decimals)
+# max: 100            # highest value (at most 2 decimals, above min)
+# step: 1             # value step of drag, keyboard and interpolation
+# unit: "%"           # shown after every value (may be empty)
+# label: Luminosité   # name of the value (detail row, chart label)
+# Curve written by the "reset" button (at least 2 valid points):
+# default_curve: "19:00@100;21:00@70;22:30@30;23:30@12"
+
+# Optional: the sensor computed by Home Assistant. The card shows its value
+# next to the curve's and explains a difference with the sensor's
+# attributes: with mode "override" it shows the sensor's "reason" (e.g.
+# "Curve disabled"); with mode "curve" nothing (the two values match).
+target_sensor: sensor.brightness_curve_target
+
+# Optional: the device the curve drives (any entity). The card shows its
+# state: a light on / off with its brightness, a thermostat's current
+# temperature, any other entity's state and unit. Replace it by yours, or
+# remove the line.
+target_entity: light.your_light
+
+# Optional: title shown at the top of the card (none when omitted).
+title: Living room light
+
+# Visible time range (horizontal axis). It must fit inside the "curve day"
+# that runs from 12:00 to 12:00 the next day, so 17:00 -> 08:00 crosses
+# midnight without trouble.
+# Times are QUOTED on purpose: in a YAML-mode dashboard (ui-lovelace.yaml,
+# read by Home Assistant as YAML 1.1), an unquoted 17:00 becomes the number
+# 1020 (base 60: 17 x 60) and the card rejects the configuration. The
+# "Manual" card editor (YAML 1.2) would read it as a time, but with the
+# quotes this block works everywhere.
+window_start: "17:00"
+window_end: "08:00"
+
+# Time step of a point, in minutes. Must divide 60:
+# 1, 2, 3, 4, 5, 6, 10, 12, 15, 20, 30 or 60.
+snap_minutes: 5
+
+# Maximum number of points: the curve must fit in the 255 characters of the
+# input_text. The upper bound depends on the range: 25 for brightness
+# (at most 10 characters per point), 23 for the temperature and
+# color_temp presets.
+max_points: 12
+
+# Curve colour: the theme's by default. To change it, define the variable
+# --time-curve-card-color in your theme (optional).

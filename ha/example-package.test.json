@@ -1,0 +1,67 @@
+{
+  "$comment": "Test descriptor of example-package.yaml, read by test/jinja/test_sensor.py (npm run test:jinja). The format is documented in the docstring of that file.",
+  "package": "example-package.yaml",
+  "curve_entity": "input_text.brightness_curve",
+  "sensor_unique_id": "brightness_curve_target",
+  "range": [100, 10000],
+  "step": 100,
+  "unit": "%",
+  "neutral_states": {
+    "input_boolean.brightness_curve_enabled": "on"
+  },
+  "scenarios": [
+    {
+      "name": "curve-disabled-uses-the-curve-max",
+      "states": { "input_boolean.brightness_curve_enabled": "off" },
+      "available": true,
+      "state": "max",
+      "mode": "override",
+      "reason": "Curve disabled"
+    },
+    {
+      "name": "boolean-without-value-follows-the-curve",
+      "time": "21:45",
+      "states": { "input_text.brightness_curve": "19:00@100;21:00@70;22:30@30;23:30@12" },
+      "matrix": { "input_boolean.brightness_curve_enabled": ["unavailable", "unknown", null] },
+      "available": true,
+      "state": 50,
+      "mode": "curve",
+      "reason": null
+    },
+    {
+      "name": "curve-without-value-is-unavailable",
+      "time": "21:45",
+      "states": {},
+      "matrix": {
+        "input_text.brightness_curve": ["unavailable", "unknown", null],
+        "input_boolean.brightness_curve_enabled": ["on", "off"]
+      },
+      "available": false,
+      "state": null,
+      "mode": null,
+      "reason": null
+    },
+    {
+      "name": "empty-curve-is-unavailable",
+      "time": "21:45",
+      "states": { "input_text.brightness_curve": "" },
+      "matrix": { "input_boolean.brightness_curve_enabled": ["on", "off"] },
+      "available": false,
+      "state": null,
+      "mode": null,
+      "reason": null
+    }
+  ],
+  "checks": {
+    "curve_helper": {
+      "name": "Brightness curve",
+      "min": 0,
+      "mode": "text",
+      "icon": "mdi:chart-bell-curve-cumulative"
+    },
+    "sensor": {
+      "name": "Brightness curve target",
+      "icon": "mdi:lightbulb-auto"
+    }
+  }
+}
